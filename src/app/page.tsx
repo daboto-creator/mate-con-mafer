@@ -3,59 +3,68 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { PwaInstaller } from "@/components/PwaInstaller";
-import { createExercise, nextStreak, todayKey, topics } from "@/lib/math";
+import { createExercise, nextStreak, topics } from "@/lib/math";
 import { isSupabaseReady, supabase } from "@/lib/supabase";
-import type { Attempt, Challenge, Exercise, Progress, Role, Topic } from "@/lib/types";
+import type {
+  Attempt,
+  Challenge,
+  Exercise,
+  Profile,
+  Progress,
+  Role,
+  Topic,
+  TopicProgress
+} from "@/lib/types";
 
-const childKey = "mafer";
-const accessCode = process.env.NEXT_PUBLIC_APP_ACCESS_CODE || "mafer";
 type Screen = "inicio" | "practicar" | "tutor" | "progreso" | "papa";
 
 const initialProgress: Progress = {
   stars: 0,
   correct: 0,
+  incorrect: 0,
   total: 0,
   streak: 0,
   topics: [],
   lastStudyDate: null
 };
 
-const emptyChallenge: Challenge[] = [];
+const testProfiles: Record<string, { fullName: string; role: Role; grade: string | null }> = {
+  "parent@example.com": { fullName: "Papá", role: "parent", grade: null },
+  "mafer@example.com": { fullName: "Mafer", role: "child", grade: "Primaria" }
+};
 
 export default function Home() {
-  const [role, setRole] = useState<Role | null>(null);
-  const [code, setCode] = useState("");
-  const [codeError, setCodeError] = useState("");
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
   const [screen, setScreen] = useState<Screen>("inicio");
-  const [progress, setProgress] = useState<Progress>(initialProgress);
+  const [progressRows, setProgressRows] = useState<TopicProgress[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
-  const [challenges, setChallenges] = useState<Challenge[]>(emptyChallenge);
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [selectedChildId, setSelectedChildId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic>("sumas");
   const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas"));
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
 
-  const modeLabel = isSupabaseReady ? "Conectado a Supabase" : "Modo local de prueba";
+  const progress = useMemo(() => summarizeProgress(progressRows, attempts), [attempts, progressRows]);
+  const modeLabel = isSupabaseReady ? "Conectado a Supabase" : "Faltan variables de Supabase";
 
   useEffect(() => {
-    const savedRole = window.localStorage.getItem("mate-role") as Role | null;
     const savedPhoto = window.localStorage.getItem("mate-photo");
-    const savedProgress = window.localStorage.getItem("mate-progress");
-    const savedAttempts = window.localStorage.getItem("mate-attempts");
-    const savedChallenges = window.localStorage.getItem("mate-challenges");
-
-    if (savedRole) setRole(savedRole);
     if (savedPhoto) setPhoto(savedPhoto);
-    if (savedProgress) setProgress(JSON.parse(savedProgress));
-    if (savedAttempts) setAttempts(JSON.parse(savedAttempts));
-    if (savedChallenges) setChallenges(JSON.parse(savedChallenges));
+    void restoreSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!role) return;
-    void loadRemoteData();
-  }, [role]);
+    if (!profile) return;
+    void loadRemoteData(profile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
 
   const errorsByTopic = useMemo(() => {
     return topics.map((topic) => ({
@@ -65,121 +74,212 @@ export default function Home() {
     }));
   }, [attempts]);
 
-  async function enterApp(nextRole: Role) {
-    if (code.trim().toLowerCase() !== accessCode.toLowerCase()) {
-      setCodeError("Código privado incorrecto.");
+  async function restoreSession() {
+    if (!supabase) {
+      setIsLoading(false);
       return;
     }
 
-    setCodeError("");
-    setRole(nextRole);
-    setScreen(nextRole === "papa" ? "papa" : "inicio");
-    window.localStorage.setItem("mate-role", nextRole);
-
-    if (supabase) {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
-        await supabase.auth.signInAnonymously();
-      }
+    const { data } = await supabase.auth.getSession();
+    if (!data.session?.user) {
+      setIsLoading(false);
+      return;
     }
+
+    const nextProfile = await loadOrCreateProfile(data.session.user.id, data.session.user.email ?? "");
+    if (nextProfile) {
+      enterRole(nextProfile);
+    }
+    setIsLoading(false);
   }
 
-  async function loadRemoteData() {
-    if (!supabase) return;
+  async function login() {
+    if (!supabase) {
+      setAuthError("Configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
 
-    const { data: progressRow } = await supabase
-      .from("progress")
+    setAuthError("");
+    setIsLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password
+    });
+
+    if (error || !data.user) {
+      setAuthError("No pude iniciar sesión. Revisa el correo y la contraseña.");
+      setIsLoading(false);
+      return;
+    }
+
+    const nextProfile = await loadOrCreateProfile(data.user.id, data.user.email ?? email);
+    if (!nextProfile) {
+      await supabase.auth.signOut();
+      setAuthError("No hay perfil de prueba para este correo.");
+      setIsLoading(false);
+      return;
+    }
+
+    enterRole(nextProfile);
+    setIsLoading(false);
+  }
+
+  function enterRole(nextProfile: Profile) {
+    setProfile(nextProfile);
+    setScreen(nextProfile.role === "parent" ? "papa" : "inicio");
+  }
+
+  async function loadOrCreateProfile(userId: string, userEmail: string) {
+    if (!supabase) return null;
+
+    const { data: existingProfile } = await supabase
+      .from("profiles")
       .select("*")
-      .eq("child_key", childKey)
+      .eq("id", userId)
       .maybeSingle();
 
-    if (progressRow) {
-      setProgress({
-        stars: progressRow.stars ?? 0,
-        correct: progressRow.correct ?? 0,
-        total: progressRow.total ?? 0,
-        streak: progressRow.streak ?? 0,
-        topics: progressRow.topics ?? [],
-        lastStudyDate: progressRow.last_study_date
-      });
+    if (existingProfile) {
+      return mapProfile(existingProfile);
     }
 
-    const { data: attemptRows } = await supabase
-      .from("attempts")
+    const testProfile = testProfiles[userEmail.trim().toLowerCase()];
+    if (!testProfile) {
+      return null;
+    }
+
+    const { data: createdProfile, error } = await supabase
+      .from("profiles")
+      .insert({
+        id: userId,
+        full_name: testProfile.fullName,
+        role: testProfile.role,
+        grade: testProfile.grade
+      })
       .select("*")
-      .eq("child_key", childKey)
-      .order("created_at", { ascending: false })
-      .limit(100);
+      .single();
 
-    if (attemptRows) {
-      setAttempts(
-        attemptRows.map((row) => ({
-          topic: row.topic,
-          question: row.question,
-          answer: row.answer,
-          correctAnswer: row.correct_answer,
-          isCorrect: row.is_correct,
-          createdAt: row.created_at
-        }))
-      );
+    if (error || !createdProfile) {
+      setAuthError("No pude crear el perfil de prueba en Supabase.");
+      return null;
     }
 
-    const { data: challengeRows } = await supabase
-      .from("challenges")
-      .select("*")
-      .eq("child_key", childKey)
-      .order("created_at", { ascending: false });
-
-    if (challengeRows) {
-      setChallenges(
-        challengeRows.map((row) => ({
-          id: row.id,
-          questionCount: row.question_count,
-          topic: row.topic,
-          createdAt: row.created_at
-        }))
-      );
-    }
+    return mapProfile(createdProfile);
   }
 
-  async function saveProgress(nextProgress: Progress, nextAttempts = attempts) {
-    setProgress(nextProgress);
-    window.localStorage.setItem("mate-progress", JSON.stringify(nextProgress));
-    window.localStorage.setItem("mate-attempts", JSON.stringify(nextAttempts));
+  async function loadRemoteData(currentProfile = profile) {
+    if (!supabase || !currentProfile) return;
 
-    if (!supabase) return;
+    if (currentProfile.role === "child") {
+      const [{ data: attemptRows }, { data: progressData }, { data: assignmentRows }] = await Promise.all([
+        supabase
+          .from("math_attempts")
+          .select("*")
+          .eq("user_id", currentProfile.id)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        supabase.from("math_progress").select("*").eq("user_id", currentProfile.id),
+        supabase
+          .from("assignments")
+          .select("*")
+          .eq("child_id", currentProfile.id)
+          .order("created_at", { ascending: false })
+      ]);
 
-    await supabase.from("progress").upsert({
-      child_key: childKey,
-      stars: nextProgress.stars,
-      correct: nextProgress.correct,
-      total: nextProgress.total,
-      streak: nextProgress.streak,
-      topics: nextProgress.topics,
-      last_study_date: nextProgress.lastStudyDate,
-      updated_at: new Date().toISOString()
-    });
+      setAttempts((attemptRows ?? []).map(mapAttempt));
+      setProgressRows((progressData ?? []).map(mapTopicProgress));
+      setChallenges((assignmentRows ?? []).map(mapChallenge));
+      setSelectedChildId(currentProfile.id);
+      return;
+    }
+
+    const { data: assignmentRows } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("parent_id", currentProfile.id)
+      .order("created_at", { ascending: false });
+
+    const assignments = (assignmentRows ?? []).map(mapChallenge);
+    const childIds = Array.from(new Set(assignments.map((assignment) => assignment.childId)));
+    const activeChildId = selectedChildId || childIds[0] || "";
+    setChallenges(assignments);
+    setSelectedChildId(activeChildId);
+
+    if (!activeChildId) {
+      setAttempts([]);
+      setProgressRows([]);
+      return;
+    }
+
+    const [{ data: attemptRows }, { data: progressData }] = await Promise.all([
+      supabase
+        .from("math_attempts")
+        .select("*")
+        .eq("user_id", activeChildId)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      supabase.from("math_progress").select("*").eq("user_id", activeChildId)
+    ]);
+
+    setAttempts((attemptRows ?? []).map(mapAttempt));
+    setProgressRows((progressData ?? []).map(mapTopicProgress));
   }
 
   async function saveAttempt(attempt: Attempt) {
+    if (!supabase || !profile || profile.role !== "child") return;
+
     const nextAttempts = [attempt, ...attempts];
     setAttempts(nextAttempts);
-    window.localStorage.setItem("mate-attempts", JSON.stringify(nextAttempts));
 
-    if (!supabase) return;
-
-    await supabase.from("attempts").insert({
-      child_key: childKey,
+    await supabase.from("math_attempts").insert({
+      user_id: profile.id,
       topic: attempt.topic,
       question: attempt.question,
-      answer: attempt.answer,
-      correct_answer: attempt.correctAnswer,
+      answer_given: String(attempt.answer),
+      correct_answer: String(attempt.correctAnswer),
       is_correct: attempt.isCorrect,
       created_at: attempt.createdAt
     });
   }
 
+  async function updateTopicProgress(topic: Topic, isCorrect: boolean) {
+    if (!supabase || !profile || profile.role !== "child") return;
+
+    const existing = progressRows.find((row) => row.topic === topic);
+    const lastStudyDate = existing?.lastPracticedAt?.slice(0, 10) ?? null;
+    const streakDays = nextStreak(lastStudyDate, existing?.streakDays ?? 0);
+    const nextRow: TopicProgress = {
+      id: existing?.id ?? crypto.randomUUID(),
+      userId: profile.id,
+      topic,
+      correctAnswers: (existing?.correctAnswers ?? 0) + (isCorrect ? 1 : 0),
+      incorrectAnswers: (existing?.incorrectAnswers ?? 0) + (isCorrect ? 0 : 1),
+      stars: (existing?.stars ?? 0) + (isCorrect ? 1 : 0),
+      streakDays,
+      lastPracticedAt: new Date().toISOString()
+    };
+
+    setProgressRows((rows) => [nextRow, ...rows.filter((row) => row.topic !== topic)]);
+
+    await supabase.from("math_progress").upsert(
+      {
+        user_id: profile.id,
+        topic,
+        correct_answers: nextRow.correctAnswers,
+        incorrect_answers: nextRow.incorrectAnswers,
+        stars: nextRow.stars,
+        streak_days: nextRow.streakDays,
+        last_practiced_at: nextRow.lastPracticedAt
+      },
+      { onConflict: "user_id,topic" }
+    );
+  }
+
   async function reviewAnswer() {
+    if (!profile || profile.role !== "child") {
+      setFeedback("Inicia sesión como Mafer para practicar.");
+      return;
+    }
+
     const numericAnswer = Number(answer);
     if (Number.isNaN(numericAnswer) || answer.trim() === "") {
       setFeedback("Escribe tu respuesta primero. Yo espero contigo.");
@@ -196,19 +296,8 @@ export default function Home() {
       createdAt: new Date().toISOString()
     };
 
-    const nextProgress: Progress = {
-      stars: progress.stars + (isCorrect ? 1 : 0),
-      correct: progress.correct + (isCorrect ? 1 : 0),
-      total: progress.total + 1,
-      streak: nextStreak(progress.lastStudyDate, progress.streak),
-      topics: progress.topics.includes(exercise.topic)
-        ? progress.topics
-        : [...progress.topics, exercise.topic],
-      lastStudyDate: todayKey()
-    };
-
     await saveAttempt(attempt);
-    await saveProgress(nextProgress, [attempt, ...attempts]);
+    await updateTopicProgress(exercise.topic, isCorrect);
 
     setFeedback(
       isCorrect
@@ -224,26 +313,36 @@ export default function Home() {
     setFeedback("");
   }
 
-  async function createChallenge(questionCount: 5 | 10, topic: Challenge["topic"]) {
-    const challenge: Challenge = {
-      id: crypto.randomUUID(),
-      questionCount,
-      topic,
-      createdAt: new Date().toISOString()
-    };
-    const nextChallenges = [challenge, ...challenges];
-    setChallenges(nextChallenges);
-    window.localStorage.setItem("mate-challenges", JSON.stringify(nextChallenges));
+  async function createChallenge(questionCount: 5 | 10, topic: Challenge["topic"], childId: string) {
+    if (!supabase || !profile || profile.role !== "parent") return;
 
-    if (supabase) {
-      await supabase.from("challenges").insert({
-        id: challenge.id,
-        child_key: childKey,
-        question_count: questionCount,
-        topic,
-        created_at: challenge.createdAt
-      });
+    if (!childId) {
+      setFeedback("Primero necesitas el id de Mafer o una asignación existente.");
+      return;
     }
+
+    const { data, error } = await supabase
+      .from("assignments")
+      .insert({
+        parent_id: profile.id,
+        child_id: childId,
+        topic,
+        number_of_questions: questionCount,
+        difficulty: "normal",
+        status: "pending"
+      })
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      setFeedback("No pude crear el reto. Revisa que el id de Mafer exista y que la relación esté permitida.");
+      return;
+    }
+
+    const nextChallenge = mapChallenge(data);
+    setChallenges((items) => [nextChallenge, ...items]);
+    setSelectedChildId(childId);
+    setFeedback("Reto creado para Mafer.");
   }
 
   function handlePhoto(file: File | undefined) {
@@ -257,14 +356,21 @@ export default function Home() {
     reader.readAsDataURL(file);
   }
 
-  function leaveApp() {
-    setRole(null);
-    setCode("");
+  async function leaveApp() {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setProfile(null);
+    setEmail("");
+    setPassword("");
     setScreen("inicio");
-    window.localStorage.removeItem("mate-role");
+    setAttempts([]);
+    setProgressRows([]);
+    setChallenges([]);
+    setSelectedChildId("");
   }
 
-  if (!role) {
+  if (!profile) {
     return (
       <main className="min-h-screen px-4 py-6 sm:px-8">
         <PwaInstaller />
@@ -282,7 +388,7 @@ export default function Home() {
             <div className="overflow-hidden rounded-[2rem] shadow-soft">
               <Image
                 src="/images/mate-con-mafer-hero.png"
-                alt="Ilustracion infantil de Mate con Mafer"
+                alt="Ilustración infantil de Mate con Mafer"
                 width={1200}
                 height={675}
                 priority
@@ -299,25 +405,41 @@ export default function Home() {
                 <h2 className="text-3xl font-black text-ink">Entrar</h2>
               </div>
             </div>
-            <label className="block text-sm font-bold text-ink/70" htmlFor="code">
-              Código privado
-            </label>
-            <input
-              id="code"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              className="mt-2 w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
-              placeholder="Escribe el código"
-              type="password"
-            />
-            {codeError ? <p className="mt-3 font-bold text-berry">{codeError}</p> : null}
-            <div className="mt-6 grid gap-3">
-              <button className="big-button bg-coral text-white" onClick={() => enterApp("mafer")}>
-                Entrar como Mafer
-              </button>
-              <button className="big-button bg-ink text-white" onClick={() => enterApp("papa")}>
-                Entrar como papá
-              </button>
+            <div className="grid gap-4">
+              <label className="block text-sm font-bold text-ink/70" htmlFor="email">
+                Correo
+              </label>
+              <input
+                id="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
+                placeholder="mafer@example.com"
+                type="email"
+              />
+              <label className="block text-sm font-bold text-ink/70" htmlFor="password">
+                Contraseña
+              </label>
+              <input
+                id="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
+                placeholder="Contraseña de prueba"
+                type="password"
+              />
+            </div>
+            {authError ? <p className="mt-3 font-bold text-berry">{authError}</p> : null}
+            <button
+              className="big-button mt-6 w-full bg-coral text-white disabled:opacity-60"
+              disabled={isLoading}
+              onClick={login}
+            >
+              {isLoading ? "Entrando..." : "Iniciar sesión"}
+            </button>
+            <div className="mt-5 rounded-3xl bg-rose-50 p-4 text-sm font-bold leading-6 text-ink/65">
+              Cuentas de prueba: parent@example.com y mafer@example.com. Crea esas cuentas en Supabase Auth con una
+              contraseña de prueba que tú elijas.
             </div>
           </div>
         </section>
@@ -335,7 +457,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-bold uppercase tracking-[0.16em] text-berry">{modeLabel}</p>
               <h1 className="text-2xl font-black text-ink sm:text-3xl">
-                {role === "papa" ? "Panel de papá" : "Hola Mafer"}
+                {profile.role === "parent" ? "Panel de papá" : "Hola Mafer"}
               </h1>
             </div>
           </div>
@@ -372,19 +494,22 @@ export default function Home() {
           />
         ) : null}
         {screen === "tutor" ? <TutorScreen /> : null}
-        {screen === "progreso" ? <ProgressScreen progress={progress} attempts={attempts} /> : null}
+        {screen === "progreso" ? <ProgressScreen progress={progress} attempts={attempts} profile={profile} /> : null}
         {screen === "papa" ? (
           <DadScreen
             attempts={attempts}
             challenges={challenges}
             createChallenge={createChallenge}
             errorsByTopic={errorsByTopic}
+            feedback={feedback}
             progress={progress}
+            selectedChildId={selectedChildId}
+            setSelectedChildId={setSelectedChildId}
           />
         ) : null}
       </div>
 
-      <BottomNav role={role} screen={screen} setScreen={setScreen} />
+      <BottomNav role={profile.role} screen={screen} setScreen={setScreen} />
     </main>
   );
 }
@@ -536,15 +661,24 @@ function TutorScreen() {
   );
 }
 
-function ProgressScreen({ attempts, progress }: { attempts: Attempt[]; progress: Progress }) {
+function ProgressScreen({
+  attempts,
+  profile,
+  progress
+}: {
+  attempts: Attempt[];
+  profile: Profile;
+  progress: Progress;
+}) {
   return (
     <section className="space-y-5">
       <Stats progress={progress} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Metric label="Respuestas correctas" value={progress.correct} />
+        <Metric label="Errores" value={progress.incorrect} />
         <Metric label="Ejercicios realizados" value={progress.total} />
         <Metric label="Temas practicados" value={progress.topics.map(topicLabel).join(", ") || "Aún ninguno"} />
-        <Metric label="Último estudio" value={progress.lastStudyDate || "Aún no"} />
+        {profile.role === "child" ? <Metric label="Id de Mafer" value={profile.id} /> : null}
       </div>
       <div className="rounded-[2rem] bg-white p-6 shadow-soft">
         <h2 className="text-2xl font-black text-ink">Últimos ejercicios</h2>
@@ -557,7 +691,7 @@ function ProgressScreen({ attempts, progress }: { attempts: Attempt[]; progress:
               </span>
             </div>
           ))}
-          {attempts.length === 0 ? <p className="font-bold text-ink/60">Todavia no hay ejercicios.</p> : null}
+          {attempts.length === 0 ? <p className="font-bold text-ink/60">Todavía no hay ejercicios.</p> : null}
         </div>
       </div>
     </section>
@@ -569,16 +703,23 @@ function DadScreen({
   challenges,
   createChallenge,
   errorsByTopic,
-  progress
+  feedback,
+  progress,
+  selectedChildId,
+  setSelectedChildId
 }: {
   attempts: Attempt[];
   challenges: Challenge[];
-  createChallenge: (questionCount: 5 | 10, topic: Challenge["topic"]) => void;
+  createChallenge: (questionCount: 5 | 10, topic: Challenge["topic"], childId: string) => void;
   errorsByTopic: { id: Topic; label: string; icon: string; errors: number; total: number }[];
+  feedback: string;
   progress: Progress;
+  selectedChildId: string;
+  setSelectedChildId: (childId: string) => void;
 }) {
   const [count, setCount] = useState<5 | 10>(5);
   const [topic, setTopic] = useState<Challenge["topic"]>("mezclado");
+  const childIds = Array.from(new Set(challenges.map((challenge) => challenge.childId)));
 
   return (
     <section className="space-y-5">
@@ -607,6 +748,25 @@ function DadScreen({
         <div className="rounded-[2rem] bg-white p-6 shadow-soft">
           <h2 className="text-2xl font-black text-ink">Crear reto simple</h2>
           <div className="mt-5 grid gap-4">
+            <input
+              value={selectedChildId}
+              onChange={(event) => setSelectedChildId(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Id de Mafer en Supabase"
+            />
+            {childIds.length > 0 ? (
+              <select
+                value={selectedChildId}
+                onChange={(event) => setSelectedChildId(event.target.value)}
+                className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              >
+                {childIds.map((childId) => (
+                  <option value={childId} key={childId}>
+                    Mafer: {childId.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <select
               value={count}
               onChange={(event) => setCount(Number(event.target.value) as 5 | 10)}
@@ -627,10 +787,11 @@ function DadScreen({
                 </option>
               ))}
             </select>
-            <button className="big-button bg-ink text-white" onClick={() => createChallenge(count, topic)}>
+            <button className="big-button bg-ink text-white" onClick={() => createChallenge(count, topic, selectedChildId)}>
               Crear reto
             </button>
           </div>
+          {feedback ? <p className="mt-4 rounded-2xl bg-sunshine/60 p-4 font-black text-ink">{feedback}</p> : null}
           <div className="mt-6 space-y-3">
             <h3 className="font-black text-ink/70">Retos creados</h3>
             {challenges.slice(0, 5).map((challenge) => (
@@ -660,7 +821,7 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-[2rem] bg-white p-5 shadow-soft">
       <p className="text-sm font-black uppercase tracking-[0.14em] text-ink/50">{label}</p>
-      <p className="mt-2 text-3xl font-black text-ink">{value}</p>
+      <p className="mt-2 break-words text-3xl font-black text-ink">{value}</p>
     </div>
   );
 }
@@ -681,7 +842,7 @@ function BottomNav({
     { id: "progreso", label: "Progreso", icon: "★" }
   ];
 
-  if (role === "papa") {
+  if (role === "parent") {
     items.push({ id: "papa", label: "Papá", icon: "P" });
   }
 
@@ -705,7 +866,74 @@ function BottomNav({
   );
 }
 
+function summarizeProgress(rows: TopicProgress[], attempts: Attempt[]): Progress {
+  const correct = rows.reduce((total, row) => total + row.correctAnswers, 0);
+  const incorrect = rows.reduce((total, row) => total + row.incorrectAnswers, 0);
+  return {
+    stars: rows.reduce((total, row) => total + row.stars, 0),
+    correct,
+    incorrect,
+    total: correct + incorrect || attempts.length,
+    streak: rows.reduce((max, row) => Math.max(max, row.streakDays), 0),
+    topics: rows.map((row) => row.topic),
+    lastStudyDate:
+      rows
+        .map((row) => row.lastPracticedAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1)
+        ?.slice(0, 10) ?? null
+  };
+}
+
 function topicLabel(topic: Topic | "mezclado") {
   if (topic === "mezclado") return "mezclado";
   return topics.find((item) => item.id === topic)?.label.toLowerCase() ?? topic;
+}
+
+function mapProfile(row: any): Profile {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    role: row.role,
+    grade: row.grade,
+    createdAt: row.created_at
+  };
+}
+
+function mapAttempt(row: any): Attempt {
+  return {
+    topic: row.topic,
+    question: row.question,
+    answer: Number(row.answer_given),
+    correctAnswer: Number(row.correct_answer),
+    isCorrect: row.is_correct,
+    createdAt: row.created_at
+  };
+}
+
+function mapTopicProgress(row: any): TopicProgress {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    topic: row.topic,
+    correctAnswers: row.correct_answers ?? 0,
+    incorrectAnswers: row.incorrect_answers ?? 0,
+    stars: row.stars ?? 0,
+    streakDays: row.streak_days ?? 0,
+    lastPracticedAt: row.last_practiced_at
+  };
+}
+
+function mapChallenge(row: any): Challenge {
+  return {
+    id: row.id,
+    parentId: row.parent_id,
+    childId: row.child_id,
+    topic: row.topic,
+    questionCount: row.number_of_questions,
+    difficulty: row.difficulty,
+    status: row.status,
+    createdAt: row.created_at
+  };
 }

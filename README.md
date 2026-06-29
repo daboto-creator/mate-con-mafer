@@ -2,19 +2,20 @@
 
 Aplicación web privada para que Mafer practique matemáticas de forma sencilla, bonita e instalable en iPad, iPhone, Android y computador.
 
-Esta primera version incluye:
+Esta primera versión incluye:
 
 - Inicio de Mafer con estrellas, racha y botones grandes.
 - Práctica de sumas, restas, multiplicaciones y divisiones.
-- Un ejercicio por pantalla con respuesta, revision y pista amable.
+- Login por correo y contraseña con Supabase Auth.
+- Un ejercicio por pantalla con respuesta, revisión y pista amable.
 - Tutor de matemáticas vacío por ahora, con botón para subir foto de tarea.
 - Progreso con estrellas, respuestas correctas, temas practicados y racha.
 - Panel de papá con progreso, errores por tema, ejercicios realizados y retos de 5 o 10 preguntas.
 - PWA instalable desde Safari en iPad.
-- Supabase preparado para usuarios anónimos privados, progreso, intentos y retos.
+- Supabase preparado para usuarios, progreso, intentos y retos.
 - Sin OpenAI API, sin pagos, sin App Store y sin anuncios.
 
-## Tecnologia
+## Tecnología
 
 - Next.js
 - TypeScript
@@ -30,15 +31,12 @@ Esta primera version incluye:
 pnpm install
 ```
 
-2. Crea el archivo `.env.local` usando `.env.example` como base:
+2. Crea el archivo `.env.local` usando `.env.local.example` como base:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_anon_key
-NEXT_PUBLIC_APP_ACCESS_CODE=un-codigo-privado
+NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_publishable_key
 ```
-
-Si dejas Supabase vacio, la app funciona en modo local de prueba usando el navegador.
 
 3. Ejecuta la app:
 
@@ -54,81 +52,28 @@ http://localhost:3000
 
 ## Supabase
 
-En Supabase, activa `Authentication > Sign In / Providers > Anonymous sign-ins`.
+1. En Supabase, deja activo `Authentication > Sign In / Providers > Email`.
+2. Ejecuta el archivo [supabase-schema.sql](/Users/dbotero/Documents/mate-con-mafer/supabase-schema.sql) en el SQL Editor.
+3. Crea estas cuentas en `Authentication > Users` con contraseñas de prueba que tú elijas:
 
-Luego crea las tablas con este SQL:
-
-```sql
-create table if not exists public.progress (
-  child_key text primary key,
-  stars integer not null default 0,
-  correct integer not null default 0,
-  total integer not null default 0,
-  streak integer not null default 0,
-  topics text[] not null default '{}',
-  last_study_date date,
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists public.attempts (
-  id uuid primary key default gen_random_uuid(),
-  child_key text not null,
-  topic text not null,
-  question text not null,
-  answer integer not null,
-  correct_answer integer not null,
-  is_correct boolean not null,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists public.challenges (
-  id uuid primary key default gen_random_uuid(),
-  child_key text not null,
-  question_count integer not null check (question_count in (5, 10)),
-  topic text not null,
-  created_at timestamptz not null default now()
-);
-
-alter table public.progress enable row level security;
-alter table public.attempts enable row level security;
-alter table public.challenges enable row level security;
-
-create policy "Usuarios autenticados pueden leer progreso"
-on public.progress for select
-to authenticated
-using (true);
-
-create policy "Usuarios autenticados pueden guardar progreso"
-on public.progress for insert
-to authenticated
-with check (true);
-
-create policy "Usuarios autenticados pueden actualizar progreso"
-on public.progress for update
-to authenticated
-using (true)
-with check (true);
-
-create policy "Usuarios autenticados pueden leer intentos"
-on public.attempts for select
-to authenticated
-using (true);
-
-create policy "Usuarios autenticados pueden crear intentos"
-on public.attempts for insert
-to authenticated
-with check (true);
-
-create policy "Usuarios autenticados pueden leer retos"
-on public.challenges for select
-to authenticated
-using (true);
-
-create policy "Usuarios autenticados pueden crear retos"
-on public.challenges for insert
-to authenticated
-with check (true);
+```text
+parent@example.com
+mafer@example.com
 ```
+
+No pongas contraseñas reales ni contraseñas dentro del código.
+
+La app crea automáticamente los perfiles en la tabla `profiles` la primera vez que esas cuentas inician sesión:
+
+- `parent@example.com` queda con rol `parent`.
+- `mafer@example.com` queda con rol `child`.
+
+Para que el panel de papá vea los datos de Mafer, debe existir una fila en `assignments` con:
+
+- `parent_id`: id del perfil del papá.
+- `child_id`: id del perfil de Mafer.
+
+Puedes crear la primera relación desde el panel de papá pegando el id de Mafer, o directamente desde Supabase.
 
 ## Instalar en iPad
 
@@ -147,16 +92,14 @@ with check (true);
 ```bash
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
-NEXT_PUBLIC_APP_ACCESS_CODE
 ```
 
 4. Despliega.
 
-## Personalizacion
+## Personalización
 
-- La foto de Mafer se puede subir desde el encabezado de la app. En esta version se guarda en el dispositivo.
-- El código privado se controla con `NEXT_PUBLIC_APP_ACCESS_CODE`.
-- La imagen principal esta en `public/images/mate-con-mafer-hero.png`.
+- La foto de Mafer se puede subir desde el encabezado de la app. En esta versión se guarda en el dispositivo.
+- La imagen principal está en `public/images/mate-con-mafer-hero.png`.
 
 ## Notas de privacidad
 

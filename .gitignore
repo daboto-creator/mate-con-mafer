@@ -5,6 +5,8 @@ out
 .vercel
 .env
 .env.local
+.DS_Store
+*.webarchive
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
