@@ -46,16 +46,29 @@ create table if not exists public.assignments (
   check (parent_id <> child_id)
 );
 
+create table if not exists public.tutor_messages (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  role text not null check (role in ('user', 'assistant')),
+  content text not null,
+  topic text not null default 'general',
+  created_at timestamptz not null default now()
+);
+
 create index if not exists math_attempts_user_id_idx on public.math_attempts(user_id);
 create index if not exists math_attempts_created_at_idx on public.math_attempts(created_at);
 create index if not exists math_progress_user_id_idx on public.math_progress(user_id);
 create index if not exists assignments_parent_id_idx on public.assignments(parent_id);
 create index if not exists assignments_child_id_idx on public.assignments(child_id);
+create index if not exists tutor_messages_user_id_idx on public.tutor_messages(user_id);
+create index if not exists tutor_messages_topic_idx on public.tutor_messages(topic);
+create index if not exists tutor_messages_created_at_idx on public.tutor_messages(created_at);
 
 alter table public.profiles enable row level security;
 alter table public.math_attempts enable row level security;
 alter table public.math_progress enable row level security;
 alter table public.assignments enable row level security;
+alter table public.tutor_messages enable row level security;
 
 create or replace function public.is_parent_of(target_child_id uuid)
 returns boolean
@@ -232,3 +245,27 @@ using (
   parent_id = auth.uid()
   and public.profile_role(auth.uid()) = 'parent'
 );
+
+drop policy if exists "Tutor messages visible to owner and assigned parent" on public.tutor_messages;
+create policy "Tutor messages visible to owner and assigned parent"
+on public.tutor_messages
+for select
+to authenticated
+using (
+  user_id = auth.uid()
+  or public.is_parent_of(user_id)
+);
+
+drop policy if exists "Users can create their own tutor messages" on public.tutor_messages;
+create policy "Users can create their own tutor messages"
+on public.tutor_messages
+for insert
+to authenticated
+with check (user_id = auth.uid());
+
+drop policy if exists "Users can delete their own tutor messages" on public.tutor_messages;
+create policy "Users can delete their own tutor messages"
+on public.tutor_messages
+for delete
+to authenticated
+using (user_id = auth.uid());

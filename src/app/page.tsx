@@ -17,6 +17,10 @@ import type {
 } from "@/lib/types";
 
 type Screen = "inicio" | "practicar" | "tutor" | "progreso" | "papa";
+type TutorChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 const initialProgress: Progress = {
   stars: 0,
@@ -49,6 +53,10 @@ export default function Home() {
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
+  const [tutorInput, setTutorInput] = useState("");
+  const [tutorMessages, setTutorMessages] = useState<TutorChatMessage[]>([]);
+  const [tutorError, setTutorError] = useState("");
+  const [isTutorThinking, setIsTutorThinking] = useState(false);
 
   const progress = useMemo(() => summarizeProgress(progressRows, attempts), [attempts, progressRows]);
   const modeLabel = isSupabaseReady ? "Conectado a Supabase" : "Faltan variables de Supabase";
@@ -345,6 +353,59 @@ export default function Home() {
     setFeedback("Reto creado para Mafer.");
   }
 
+  async function saveTutorMessages(messagesToSave: TutorChatMessage[], topic: string) {
+    if (!supabase || !profile) return;
+
+    await supabase.from("tutor_messages").insert(
+      messagesToSave.map((message) => ({
+        user_id: profile.id,
+        role: message.role,
+        content: message.content.slice(0, 1200),
+        topic
+      }))
+    );
+  }
+
+  async function sendTutorMessage(quickMessage?: string, imageDataUrl?: string) {
+    const trimmedInput = (quickMessage ?? tutorInput).trim();
+    if (!trimmedInput || isTutorThinking) return;
+
+    const nextMessages: TutorChatMessage[] = [...tutorMessages, { role: "user", content: trimmedInput }];
+    const topic = detectTutorTopic(trimmedInput);
+    setTutorMessages(nextMessages);
+    setTutorInput("");
+    setTutorError("");
+    setIsTutorThinking(true);
+
+    try {
+      const response = await fetch("/api/tutor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: nextMessages, imageDataUrl })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "El tutor no pudo responder ahora.");
+      }
+
+      const assistantMessage: TutorChatMessage = { role: "assistant", content: data.reply };
+      setTutorMessages([...nextMessages, assistantMessage]);
+      await saveTutorMessages(
+        [
+          { role: "user", content: trimmedInput },
+          assistantMessage
+        ],
+        topic
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "El tutor no pudo responder ahora.";
+      setTutorError(message);
+    } finally {
+      setIsTutorThinking(false);
+    }
+  }
+
   function handlePhoto(file: File | undefined) {
     if (!file) return;
     const reader = new FileReader();
@@ -493,7 +554,16 @@ export default function Home() {
             setFeedback={setFeedback}
           />
         ) : null}
-        {screen === "tutor" ? <TutorScreen /> : null}
+        {screen === "tutor" ? (
+          <TutorScreen
+            input={tutorInput}
+            isThinking={isTutorThinking}
+            messages={tutorMessages}
+            sendMessage={sendTutorMessage}
+            setInput={setTutorInput}
+            tutorError={tutorError}
+          />
+        ) : null}
         {screen === "progreso" ? <ProgressScreen progress={progress} attempts={attempts} profile={profile} /> : null}
         {screen === "papa" ? (
           <DadScreen
@@ -642,19 +712,126 @@ function PracticeScreen({
   );
 }
 
-function TutorScreen() {
+function TutorScreen({
+  input,
+  isThinking,
+  messages,
+  sendMessage,
+  setInput,
+  tutorError
+}: {
+  input: string;
+  isThinking: boolean;
+  messages: TutorChatMessage[];
+  sendMessage: (quickMessage?: string, imageDataUrl?: string) => void;
+  setInput: (input: string) => void;
+  tutorError: string;
+}) {
+  const quickActions = [
+    "Necesito una pista",
+    "Explícame diferente",
+    "Dame otro ejemplo",
+    "Hagamos un reto"
+  ];
+
+  function handleHomeworkPhoto(file: File | undefined) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      sendMessage(
+        "Subí una foto de mi tarea. Explícame solo el primer paso para empezar.",
+        String(reader.result)
+      );
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
-    <section className="rounded-[2rem] bg-white p-6 shadow-soft sm:p-10">
+    <section className="rounded-[2rem] bg-white p-5 shadow-soft sm:p-8">
       <p className="text-sm font-black uppercase tracking-[0.16em] text-lilac">Tutor</p>
       <h2 className="mt-2 text-4xl font-black text-ink">Aquí te ayudo paso a paso.</h2>
       <p className="mt-3 max-w-2xl text-xl font-bold text-ink/70">No hago la tarea por ti.</p>
-      <div className="mt-8 grid min-h-[20rem] place-items-center rounded-[2rem] border-4 border-dashed border-ink/10 bg-rose-50 p-6 text-center">
-        <div className="space-y-4">
-          <div className="text-6xl">📷</div>
-          <label className="big-button inline-block bg-lilac text-white">
-            Subir foto de una tarea
-            <input aria-label="Subir foto de una tarea" type="file" accept="image/*" className="sr-only" />
-          </label>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_16rem]">
+        <div className="flex min-h-[26rem] flex-col rounded-[2rem] bg-rose-50 p-4">
+          <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {quickActions.map((action) => (
+              <button
+                className="rounded-2xl bg-white px-3 py-3 text-sm font-black text-ink shadow-sm disabled:opacity-60"
+                disabled={isThinking}
+                key={action}
+                onClick={() => sendMessage(action)}
+              >
+                {action}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 space-y-3 overflow-y-auto pb-4">
+            {messages.length === 0 ? (
+              <div className="grid h-full place-items-center px-4 text-center">
+                <p className="max-w-md text-2xl font-black text-ink/55">
+                  Escribe una duda de matemáticas y la revisamos juntas.
+                </p>
+              </div>
+            ) : null}
+            {messages.map((message, index) => (
+              <div
+                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                key={`${message.role}-${index}`}
+              >
+                <p
+                  className={`max-w-[85%] whitespace-pre-wrap rounded-3xl px-5 py-4 text-lg font-bold leading-7 ${
+                    message.role === "user" ? "bg-lilac text-white" : "bg-white text-ink shadow-sm"
+                  }`}
+                >
+                  {message.content}
+                </p>
+              </div>
+            ))}
+            {isThinking ? (
+              <div className="flex justify-start">
+                <p className="rounded-3xl bg-white px-5 py-4 text-lg font-black text-ink/60 shadow-sm">
+                  Pensando paso a paso...
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <form
+            className="grid gap-3 sm:grid-cols-[1fr_auto]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              sendMessage();
+            }}
+          >
+            <input
+              aria-label="Mensaje para el tutor"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              className="min-h-16 rounded-3xl border-2 border-ink/10 bg-white px-5 py-4 text-lg font-bold outline-none focus:border-lilac"
+              placeholder="Escribe tu duda..."
+            />
+            <button className="big-button bg-lilac text-white disabled:opacity-60" disabled={isThinking || !input.trim()}>
+              Enviar
+            </button>
+          </form>
+          {tutorError ? <p className="mt-3 rounded-2xl bg-sunshine/70 p-4 font-black text-ink">{tutorError}</p> : null}
+        </div>
+
+        <div className="grid min-h-56 place-items-center rounded-[2rem] border-4 border-dashed border-ink/10 bg-white p-5 text-center">
+          <div className="space-y-4">
+            <div className="text-6xl">📷</div>
+            <label className="big-button inline-block bg-ink text-white">
+              Subir foto de una tarea
+              <input
+                aria-label="Subir foto de una tarea"
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(event) => handleHomeworkPhoto(event.target.files?.[0])}
+              />
+            </label>
+          </div>
         </div>
       </div>
     </section>
@@ -889,6 +1066,18 @@ function summarizeProgress(rows: TopicProgress[], attempts: Attempt[]): Progress
 function topicLabel(topic: Topic | "mezclado") {
   if (topic === "mezclado") return "mezclado";
   return topics.find((item) => item.id === topic)?.label.toLowerCase() ?? topic;
+}
+
+function detectTutorTopic(message: string) {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("multiplic")) return "multiplicaciones";
+  if (normalized.includes("divi")) return "divisiones";
+  if (normalized.includes("rest") || normalized.includes("menos")) return "restas";
+  if (normalized.includes("sum") || normalized.includes("mas") || normalized.includes("más")) return "sumas";
+  if (normalized.includes("fraccion") || normalized.includes("fracción")) return "fracciones";
+  if (normalized.includes("reto")) return "reto";
+  if (normalized.includes("foto")) return "foto de tarea";
+  return "matematicas";
 }
 
 function mapProfile(row: any): Profile {

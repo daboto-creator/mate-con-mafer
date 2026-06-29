@@ -8,12 +8,13 @@ Esta primera versión incluye:
 - Práctica de sumas, restas, multiplicaciones y divisiones.
 - Login por correo y contraseña con Supabase Auth.
 - Un ejercicio por pantalla con respuesta, revisión y pista amable.
-- Tutor de matemáticas vacío por ahora, con botón para subir foto de tarea.
+- Tutor de matemáticas conectado a OpenAI desde una ruta segura de servidor.
+- Botones rápidos para pedir pista, otra explicación, otro ejemplo o un reto.
 - Progreso con estrellas, respuestas correctas, temas practicados y racha.
 - Panel de papá con progreso, errores por tema, ejercicios realizados y retos de 5 o 10 preguntas.
 - PWA instalable desde Safari en iPad.
-- Supabase preparado para usuarios, progreso, intentos y retos.
-- Sin OpenAI API, sin pagos, sin App Store y sin anuncios.
+- Supabase preparado para usuarios, progreso, intentos, retos y conversaciones educativas del tutor.
+- Sin pagos, sin App Store y sin anuncios.
 
 ## Tecnología
 
@@ -36,6 +37,8 @@ pnpm install
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_publishable_key
+OPENAI_API_KEY=tu_api_key_de_openai
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 3. Ejecuta la app:
@@ -75,6 +78,21 @@ Para que el panel de papá vea los datos de Mafer, debe existir una fila en `ass
 
 Puedes crear la primera relación desde el panel de papá pegando el id de Mafer, o directamente desde Supabase.
 
+La tabla `tutor_messages` guarda solo conversación educativa y tema trabajado. No guarda fotos, correos, nombres ni información personal extra.
+
+## Tutor con OpenAI
+
+El tutor usa la ruta interna `/api/tutor`, así que `OPENAI_API_KEY` nunca llega al navegador.
+
+En local y en Vercel agrega:
+
+```bash
+OPENAI_API_KEY
+OPENAI_MODEL
+```
+
+`OPENAI_MODEL` es opcional. Si lo dejas vacío, la app usa `gpt-4o-mini`.
+
 ## Instalar en iPad
 
 1. Despliega la app en Vercel.
@@ -92,6 +110,8 @@ Puedes crear la primera relación desde el panel de papá pegando el id de Mafer
 ```bash
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
+OPENAI_API_KEY
+OPENAI_MODEL
 ```
 
 4. Despliega.
@@ -107,4 +127,5 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 - No hay chat entre usuarios.
 - No hay pagos.
 - No hay anuncios.
-- No se conecta OpenAI API.
+- La clave de OpenAI solo vive en el servidor.
+- Las fotos de tareas se envían al tutor para orientar el procedimiento, pero no se guardan en Supabase.
