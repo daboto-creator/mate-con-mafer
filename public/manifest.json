@@ -1,7 +1,7 @@
 {
   "name": "Mate con Mafer",
   "short_name": "Mate Mafer",
-  "description": "Una app privada y sencilla para practicar matematicas con Mafer.",
+  "description": "Una app privada y sencilla para practicar matemáticas con Mafer.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fff7ed",

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Mate con Mafer",
-  description: "App privada para practicar matematicas paso a paso.",
+  description: "App privada para practicar matemáticas paso a paso.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     title: "Mate Mafer"
   },
   icons: {
-    apple: "/icons/icon-192.png",
+    apple: "/icons/apple-touch-icon.png",
     icon: "/icons/icon-192.png"
   }
 };

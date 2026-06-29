@@ -1,17 +1,17 @@
 # Mate con Mafer
 
-Aplicacion web privada para que Mafer practique matematicas de forma sencilla, bonita e instalable en iPad, iPhone, Android y computador.
+Aplicación web privada para que Mafer practique matemáticas de forma sencilla, bonita e instalable en iPad, iPhone, Android y computador.
 
 Esta primera version incluye:
 
 - Inicio de Mafer con estrellas, racha y botones grandes.
-- Practica de sumas, restas, multiplicaciones y divisiones.
+- Práctica de sumas, restas, multiplicaciones y divisiones.
 - Un ejercicio por pantalla con respuesta, revision y pista amable.
-- Tutor de matematicas vacio por ahora, con boton para subir foto de tarea.
+- Tutor de matemáticas vacío por ahora, con botón para subir foto de tarea.
 - Progreso con estrellas, respuestas correctas, temas practicados y racha.
-- Panel de papa con progreso, errores por tema, ejercicios realizados y retos de 5 o 10 preguntas.
+- Panel de papá con progreso, errores por tema, ejercicios realizados y retos de 5 o 10 preguntas.
 - PWA instalable desde Safari en iPad.
-- Supabase preparado para usuarios anonimos privados, progreso, intentos y retos.
+- Supabase preparado para usuarios anónimos privados, progreso, intentos y retos.
 - Sin OpenAI API, sin pagos, sin App Store y sin anuncios.
 
 ## Tecnologia
@@ -155,12 +155,12 @@ NEXT_PUBLIC_APP_ACCESS_CODE
 ## Personalizacion
 
 - La foto de Mafer se puede subir desde el encabezado de la app. En esta version se guarda en el dispositivo.
-- El codigo privado se controla con `NEXT_PUBLIC_APP_ACCESS_CODE`.
+- El código privado se controla con `NEXT_PUBLIC_APP_ACCESS_CODE`.
 - La imagen principal esta en `public/images/mate-con-mafer-hero.png`.
 
 ## Notas de privacidad
 
-- No se pide informacion personal.
+- No se pide información personal.
 - No hay chat entre usuarios.
 - No hay pagos.
 - No hay anuncios.

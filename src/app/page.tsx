@@ -67,7 +67,7 @@ export default function Home() {
 
   async function enterApp(nextRole: Role) {
     if (code.trim().toLowerCase() !== accessCode.toLowerCase()) {
-      setCodeError("Codigo privado incorrecto.");
+      setCodeError("Código privado incorrecto.");
       return;
     }
 
@@ -276,7 +276,7 @@ export default function Home() {
             <div className="space-y-4">
               <h1 className="text-5xl font-black leading-tight text-ink sm:text-7xl">Mate con Mafer</h1>
               <p className="max-w-xl text-xl leading-8 text-ink/75">
-                Practica matematicas con estrellas, retos simples y ayuda paso a paso.
+                Practica matemáticas con estrellas, retos simples y ayuda paso a paso.
               </p>
             </div>
             <div className="overflow-hidden rounded-[2rem] shadow-soft">
@@ -300,14 +300,14 @@ export default function Home() {
               </div>
             </div>
             <label className="block text-sm font-bold text-ink/70" htmlFor="code">
-              Codigo privado
+              Código privado
             </label>
             <input
               id="code"
               value={code}
               onChange={(event) => setCode(event.target.value)}
               className="mt-2 w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
-              placeholder="Escribe el codigo"
+              placeholder="Escribe el código"
               type="password"
             />
             {codeError ? <p className="mt-3 font-bold text-berry">{codeError}</p> : null}
@@ -316,7 +316,7 @@ export default function Home() {
                 Entrar como Mafer
               </button>
               <button className="big-button bg-ink text-white" onClick={() => enterApp("papa")}>
-                Entrar como papa
+                Entrar como papá
               </button>
             </div>
           </div>
@@ -335,7 +335,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-bold uppercase tracking-[0.16em] text-berry">{modeLabel}</p>
               <h1 className="text-2xl font-black text-ink sm:text-3xl">
-                {role === "papa" ? "Panel de papa" : "Hola Mafer"}
+                {role === "papa" ? "Panel de papá" : "Hola Mafer"}
               </h1>
             </div>
           </div>
@@ -412,7 +412,7 @@ function HomeScreen({
       <div className="rounded-[2rem] bg-white p-5 shadow-soft">
         <Image
           src="/images/mate-con-mafer-hero.png"
-          alt="Animales estudiando matematicas"
+          alt="Animales estudiando matemáticas"
           width={1200}
           height={675}
           className="rounded-[1.5rem]"
@@ -422,7 +422,7 @@ function HomeScreen({
         <Stats progress={progress} />
         {challenges[0] ? (
           <div className="rounded-[2rem] bg-sunshine p-5 shadow-soft">
-            <p className="text-sm font-black uppercase tracking-[0.16em] text-ink/60">Reto de papa</p>
+            <p className="text-sm font-black uppercase tracking-[0.16em] text-ink/60">Reto de papá</p>
             <h2 className="text-2xl font-black text-ink">
               {challenges[0].questionCount} preguntas de {topicLabel(challenges[0].topic)}
             </h2>
@@ -433,7 +433,7 @@ function HomeScreen({
             Practicar
           </button>
           <button className="big-button bg-lilac text-white" onClick={() => setScreen("tutor")}>
-            Tutor de matematicas
+            Tutor de matemáticas
           </button>
           <button className="big-button bg-ink text-white" onClick={() => setScreen("progreso")}>
             Mi progreso
@@ -521,7 +521,7 @@ function TutorScreen() {
   return (
     <section className="rounded-[2rem] bg-white p-6 shadow-soft sm:p-10">
       <p className="text-sm font-black uppercase tracking-[0.16em] text-lilac">Tutor</p>
-      <h2 className="mt-2 text-4xl font-black text-ink">Aqui te ayudo paso a paso.</h2>
+      <h2 className="mt-2 text-4xl font-black text-ink">Aquí te ayudo paso a paso.</h2>
       <p className="mt-3 max-w-2xl text-xl font-bold text-ink/70">No hago la tarea por ti.</p>
       <div className="mt-8 grid min-h-[20rem] place-items-center rounded-[2rem] border-4 border-dashed border-ink/10 bg-rose-50 p-6 text-center">
         <div className="space-y-4">
@@ -543,11 +543,11 @@ function ProgressScreen({ attempts, progress }: { attempts: Attempt[]; progress:
       <div className="grid gap-4 sm:grid-cols-2">
         <Metric label="Respuestas correctas" value={progress.correct} />
         <Metric label="Ejercicios realizados" value={progress.total} />
-        <Metric label="Temas practicados" value={progress.topics.map(topicLabel).join(", ") || "Aun ninguno"} />
-        <Metric label="Ultimo estudio" value={progress.lastStudyDate || "Aun no"} />
+        <Metric label="Temas practicados" value={progress.topics.map(topicLabel).join(", ") || "Aún ninguno"} />
+        <Metric label="Último estudio" value={progress.lastStudyDate || "Aún no"} />
       </div>
       <div className="rounded-[2rem] bg-white p-6 shadow-soft">
-        <h2 className="text-2xl font-black text-ink">Ultimos ejercicios</h2>
+        <h2 className="text-2xl font-black text-ink">Últimos ejercicios</h2>
         <div className="mt-4 space-y-3">
           {attempts.slice(0, 8).map((attempt, index) => (
             <div className="flex items-center justify-between rounded-2xl bg-rose-50 px-4 py-3" key={index}>
@@ -638,7 +638,7 @@ function DadScreen({
                 {challenge.questionCount} preguntas de {topicLabel(challenge.topic)}
               </div>
             ))}
-            {challenges.length === 0 ? <p className="font-bold text-ink/60">No hay retos todavia.</p> : null}
+            {challenges.length === 0 ? <p className="font-bold text-ink/60">No hay retos todavía.</p> : null}
           </div>
         </div>
       </div>
@@ -651,7 +651,7 @@ function Stats({ progress }: { progress: Progress }) {
   return (
     <div className="grid grid-cols-2 gap-4">
       <Metric label="Estrellas acumuladas" value={`⭐ ${progress.stars}`} />
-      <Metric label="Racha de dias" value={`${progress.streak} dias`} />
+      <Metric label="Racha de días" value={`${progress.streak} días`} />
     </div>
   );
 }
@@ -682,7 +682,7 @@ function BottomNav({
   ];
 
   if (role === "papa") {
-    items.push({ id: "papa", label: "Papa", icon: "P" });
+    items.push({ id: "papa", label: "Papá", icon: "P" });
   }
 
   return (
