@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #25313f;
+  background: #fff7ed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(78, 205, 196, 0.18), transparent 28rem),
+    linear-gradient(135deg, #fff7ed 0%, #fff1f2 48%, #eefdfb 100%);
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@layer components {
+  .big-button {
+    @apply rounded-3xl px-5 py-5 text-center text-xl font-black shadow-sm transition active:scale-[0.98];
+  }
+}
