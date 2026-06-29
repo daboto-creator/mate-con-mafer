@@ -71,12 +71,21 @@ La app crea automáticamente los perfiles en la tabla `profiles` la primera vez 
 - `parent@example.com` queda con rol `parent`.
 - `mafer@example.com` queda con rol `child`.
 
+Si quieres dejar los perfiles listos sin esperar al primer login, ejecuta despues [supabase-onboarding.sql](/Users/dbotero/Documents/mate-con-mafer/supabase-onboarding.sql). Ese archivo no crea contraseñas; solo crea/actualiza los perfiles usando los usuarios que ya existen en Supabase Auth.
+
 Para que el panel de papá vea los datos de Mafer, debe existir una fila en `assignments` con:
 
 - `parent_id`: id del perfil del papá.
 - `child_id`: id del perfil de Mafer.
 
 Puedes crear la primera relación desde el panel de papá pegando el id de Mafer, o directamente desde Supabase.
+
+Si el papá no puede crear un reto, casi siempre falta una de estas cosas:
+
+- Mafer no existe todavía en `Authentication > Users`.
+- Mafer existe en Auth, pero todavía no existe su fila en `profiles` con rol `child`.
+- El papá existe en Auth, pero no existe su fila en `profiles` con rol `parent`.
+- El id pegado en el panel no es el id de Mafer.
 
 La tabla `tutor_messages` guarda solo conversación educativa y tema trabajado. No guarda fotos, correos, nombres ni información personal extra.
 

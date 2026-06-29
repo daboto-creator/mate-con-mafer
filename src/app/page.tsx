@@ -343,7 +343,9 @@ export default function Home() {
       .single();
 
     if (error || !data) {
-      setFeedback("No pude crear el reto. Revisa que el id de Mafer exista y que la relación esté permitida.");
+      setFeedback(
+        "No pude crear el reto. Primero confirma que Mafer ya exista en Supabase Auth, que haya iniciado sesión al menos una vez o que su perfil tenga rol child, y que pegaste su id correcto."
+      );
       return;
     }
 
