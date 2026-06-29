@@ -1,4 +1,4 @@
-export type Topic = "sumas" | "restas" | "multiplicaciones" | "divisiones";
+export type Topic = "sumas" | "restas" | "multiplicaciones" | "divisiones" | "fracciones" | "tablas";
 
 export type Role = "parent" | "child";
 
@@ -52,6 +52,7 @@ export type Challenge = {
 };
 
 export type Exercise = {
+  kind: "operation" | "word_problem";
   topic: Topic;
   left: number;
   right: number;

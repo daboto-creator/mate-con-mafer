@@ -39,6 +39,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_publishable_key
 OPENAI_API_KEY=tu_api_key_de_openai
 OPENAI_MODEL=gpt-4o-mini
+SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key_de_supabase
 ```
 
 3. Ejecuta la app:
@@ -89,6 +90,18 @@ Si el papá no puede crear un reto, casi siempre falta una de estas cosas:
 
 La tabla `tutor_messages` guarda solo conversación educativa y tema trabajado. No guarda fotos, correos, nombres ni información personal extra.
 
+## Alta de papá e hija
+
+La app permite crear una cuenta de papá desde la pantalla de entrada. Después, desde el panel de papá, se puede dar de alta a la hija con nombre, correo, grado y una contraseña temporal.
+
+Para que papá pueda crear la cuenta de la hija desde la app, agrega esta variable solo en el servidor/local/Vercel:
+
+```bash
+SUPABASE_SERVICE_ROLE_KEY
+```
+
+En Supabase está en `Project Settings > API > service_role key`. Es una clave privada: no debe comenzar con `NEXT_PUBLIC_` y no debe subirse a GitHub.
+
 ## Tutor con OpenAI
 
 El tutor usa la ruta interna `/api/tutor`, así que `OPENAI_API_KEY` nunca llega al navegador.
@@ -119,6 +132,7 @@ OPENAI_MODEL
 ```bash
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
 OPENAI_API_KEY
 OPENAI_MODEL
 ```
@@ -137,4 +151,5 @@ OPENAI_MODEL
 - No hay pagos.
 - No hay anuncios.
 - La clave de OpenAI solo vive en el servidor.
+- La clave `SUPABASE_SERVICE_ROLE_KEY` solo vive en el servidor y se usa para crear la cuenta de la hija.
 - Las fotos de tareas se envían al tutor para orientar el procedimiento, pero no se guardan en Supabase.

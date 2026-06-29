@@ -17,6 +17,8 @@ import type {
 } from "@/lib/types";
 
 type Screen = "inicio" | "practicar" | "tutor" | "progreso" | "papa";
+type PracticeMode = "operation" | "word_problem";
+type AuthMode = "login" | "signup_parent";
 type TutorChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -34,13 +36,15 @@ const initialProgress: Progress = {
 
 const testProfiles: Record<string, { fullName: string; role: Role; grade: string | null }> = {
   "parent@example.com": { fullName: "Papá", role: "parent", grade: null },
-  "mafer@example.com": { fullName: "Mafer", role: "child", grade: "Primaria" }
+  "mafer@example.com": { fullName: "Mafer", role: "child", grade: "4 de primaria" }
 };
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [parentName, setParentName] = useState("Papá");
   const [authError, setAuthError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [screen, setScreen] = useState<Screen>("inicio");
@@ -49,7 +53,8 @@ export default function Home() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChildId, setSelectedChildId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic>("sumas");
-  const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas"));
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>("operation");
+  const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas", "Primaria"));
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
@@ -129,6 +134,60 @@ export default function Home() {
     }
 
     enterRole(nextProfile);
+    setIsLoading(false);
+  }
+
+  async function signUpParent() {
+    if (!supabase) {
+      setAuthError("Configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
+
+    if (!email.trim() || password.length < 6) {
+      setAuthError("Escribe un correo y una contraseña de al menos 6 caracteres.");
+      return;
+    }
+
+    setAuthError("");
+    setIsLoading(true);
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: {
+        data: {
+          full_name: parentName.trim() || "Papá",
+          role: "parent"
+        }
+      }
+    });
+
+    if (error || !data.user) {
+      setAuthError("No pude crear la cuenta de papá. Revisa el correo o intenta iniciar sesión.");
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: createdProfile, error: profileError } = await supabase
+      .from("profiles")
+      .upsert(
+        {
+          id: data.user.id,
+          full_name: parentName.trim() || "Papá",
+          role: "parent",
+          grade: null
+        },
+        { onConflict: "id" }
+      )
+      .select("*")
+      .single();
+
+    if (profileError || !createdProfile) {
+      setAuthError("Cuenta creada. Si Supabase pide confirmar correo, confirma y luego inicia sesión.");
+      setIsLoading(false);
+      return;
+    }
+
+    enterRole(mapProfile(createdProfile));
     setIsLoading(false);
   }
 
@@ -314,9 +373,10 @@ export default function Home() {
     );
   }
 
-  function nextExercise(topic = selectedTopic) {
+  function nextExercise(topic = selectedTopic, mode = practiceMode) {
     setSelectedTopic(topic);
-    setExercise(createExercise(topic));
+    setPracticeMode(mode);
+    setExercise(createExercise(topic, profile?.grade, mode));
     setAnswer("");
     setFeedback("");
   }
@@ -353,6 +413,53 @@ export default function Home() {
     setChallenges((items) => [nextChallenge, ...items]);
     setSelectedChildId(childId);
     setFeedback("Reto creado para Mafer.");
+  }
+
+  async function createChildAccount({
+    childEmail,
+    childGrade,
+    childName,
+    childPassword
+  }: {
+    childEmail: string;
+    childGrade: string;
+    childName: string;
+    childPassword: string;
+  }) {
+    if (!supabase || !profile || profile.role !== "parent") return;
+
+    setFeedback("");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      setFeedback("Tu sesión de papá expiró. Vuelve a iniciar sesión.");
+      return;
+    }
+
+    const response = await fetch("/api/family/create-child", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: childEmail,
+        password: childPassword,
+        fullName: childName,
+        grade: childGrade
+      })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      setFeedback(data?.error || "No pude dar de alta a tu hija.");
+      return;
+    }
+
+    setSelectedChildId(data.childId);
+    setFeedback("Cuenta de tu hija creada y enlazada con papá.");
+    await loadRemoteData(profile);
   }
 
   async function saveTutorMessages(messagesToSave: TutorChatMessage[], topic: string) {
@@ -465,10 +572,27 @@ export default function Home() {
               <Avatar photo={photo} />
               <div>
                 <p className="text-sm font-bold uppercase tracking-[0.18em] text-coral">{modeLabel}</p>
-                <h2 className="text-3xl font-black text-ink">Entrar</h2>
+                <h2 className="text-3xl font-black text-ink">
+                  {authMode === "login" ? "Entrar" : "Crear cuenta de papá"}
+                </h2>
               </div>
             </div>
             <div className="grid gap-4">
+              {authMode === "signup_parent" ? (
+                <>
+                  <label className="block text-sm font-bold text-ink/70" htmlFor="parentName">
+                    Nombre
+                  </label>
+                  <input
+                    id="parentName"
+                    value={parentName}
+                    onChange={(event) => setParentName(event.target.value)}
+                    className="w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
+                    placeholder="Papá"
+                    type="text"
+                  />
+                </>
+              ) : null}
               <label className="block text-sm font-bold text-ink/70" htmlFor="email">
                 Correo
               </label>
@@ -496,13 +620,21 @@ export default function Home() {
             <button
               className="big-button mt-6 w-full bg-coral text-white disabled:opacity-60"
               disabled={isLoading}
-              onClick={login}
+              onClick={authMode === "login" ? login : signUpParent}
             >
-              {isLoading ? "Entrando..." : "Iniciar sesión"}
+              {isLoading ? "Un momento..." : authMode === "login" ? "Iniciar sesión" : "Crear cuenta"}
+            </button>
+            <button
+              className="mt-3 w-full rounded-2xl bg-ink px-4 py-3 text-sm font-black text-white"
+              onClick={() => {
+                setAuthError("");
+                setAuthMode(authMode === "login" ? "signup_parent" : "login");
+              }}
+            >
+              {authMode === "login" ? "Crear mi cuenta de papá" : "Ya tengo cuenta"}
             </button>
             <div className="mt-5 rounded-3xl bg-rose-50 p-4 text-sm font-bold leading-6 text-ink/65">
-              Cuentas de prueba: parent@example.com y mafer@example.com. Crea esas cuentas en Supabase Auth con una
-              contraseña de prueba que tú elijas.
+              Primero crea o entra como papá. Después podrás dar de alta a tu hija desde el panel.
             </div>
           </div>
         </section>
@@ -549,6 +681,7 @@ export default function Home() {
             answer={answer}
             exercise={exercise}
             feedback={feedback}
+            practiceMode={practiceMode}
             selectedTopic={selectedTopic}
             setAnswer={setAnswer}
             nextExercise={nextExercise}
@@ -571,6 +704,7 @@ export default function Home() {
           <DadScreen
             attempts={attempts}
             challenges={challenges}
+            createChildAccount={createChildAccount}
             createChallenge={createChallenge}
             errorsByTopic={errorsByTopic}
             feedback={feedback}
@@ -646,6 +780,7 @@ function PracticeScreen({
   exercise,
   feedback,
   nextExercise,
+  practiceMode,
   reviewAnswer,
   selectedTopic,
   setAnswer,
@@ -654,7 +789,8 @@ function PracticeScreen({
   answer: string;
   exercise: Exercise;
   feedback: string;
-  nextExercise: (topic?: Topic) => void;
+  nextExercise: (topic?: Topic, mode?: PracticeMode) => void;
+  practiceMode: PracticeMode;
   reviewAnswer: () => void;
   selectedTopic: Topic;
   setAnswer: (answer: string) => void;
@@ -662,14 +798,14 @@ function PracticeScreen({
 }) {
   return (
     <section className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {topics.map((topic) => (
           <button
             className={`rounded-3xl px-4 py-4 text-lg font-black shadow-sm ${
               selectedTopic === topic.id ? "bg-ink text-white" : "bg-white text-ink"
             }`}
             key={topic.id}
-            onClick={() => nextExercise(topic.id)}
+            onClick={() => nextExercise(topic.id, practiceMode)}
           >
             <span className="mr-2">{topic.icon}</span>
             {topic.label}
@@ -677,9 +813,34 @@ function PracticeScreen({
         ))}
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          className={`rounded-3xl px-5 py-4 text-lg font-black shadow-sm ${
+            practiceMode === "operation" ? "bg-coral text-white" : "bg-white text-ink"
+          }`}
+          onClick={() => nextExercise(selectedTopic, "operation")}
+        >
+          Ejercicios directos
+        </button>
+        <button
+          className={`rounded-3xl px-5 py-4 text-lg font-black shadow-sm ${
+            practiceMode === "word_problem" ? "bg-lilac text-white" : "bg-white text-ink"
+          }`}
+          onClick={() => nextExercise(selectedTopic, "word_problem")}
+        >
+          Problemas con historia
+        </button>
+      </div>
+
       <div className="rounded-[2rem] bg-white p-6 text-center shadow-soft sm:p-10">
-        <p className="text-sm font-black uppercase tracking-[0.16em] text-coral">{topicLabel(exercise.topic)}</p>
-        <div className="my-8 rounded-[2rem] bg-rose-50 px-4 py-10 text-7xl font-black text-ink sm:text-8xl">
+        <p className="text-sm font-black uppercase tracking-[0.16em] text-coral">
+          {practiceMode === "word_problem" ? "Problema" : "Ejercicio"} de {topicLabel(exercise.topic)}
+        </p>
+        <div
+          className={`my-8 rounded-[2rem] bg-rose-50 px-4 py-10 font-black text-ink ${
+            exercise.kind === "word_problem" ? "text-3xl leading-tight sm:text-5xl" : "text-7xl sm:text-8xl"
+          }`}
+        >
           {exercise.question}
         </div>
         <input
@@ -690,6 +851,11 @@ function PracticeScreen({
           className="mx-auto w-full max-w-sm rounded-3xl border-2 border-ink/10 bg-white px-6 py-5 text-center text-4xl font-black outline-none focus:border-coral"
           placeholder="?"
         />
+        {exercise.topic === "fracciones" ? (
+          <p className="mx-auto mt-3 max-w-lg text-sm font-bold text-ink/55">
+            En fracciones con el mismo denominador, escribe solo el número de arriba.
+          </p>
+        ) : null}
         <div className="mx-auto mt-5 grid max-w-xl gap-3 sm:grid-cols-3">
           <button className="big-button bg-coral text-white sm:col-span-1" onClick={reviewAnswer}>
             Revisar
@@ -700,7 +866,7 @@ function PracticeScreen({
           >
             Necesito una pista
           </button>
-          <button className="big-button bg-ink text-white sm:col-span-1" onClick={() => nextExercise()}>
+          <button className="big-button bg-ink text-white sm:col-span-1" onClick={() => nextExercise(selectedTopic, practiceMode)}>
             Siguiente
           </button>
         </div>
@@ -733,7 +899,8 @@ function TutorScreen({
     "Necesito una pista",
     "Explícame diferente",
     "Dame otro ejemplo",
-    "Hagamos un reto"
+    "Hagamos un reto",
+    "Rutina de una hora"
   ];
 
   function handleHomeworkPhoto(file: File | undefined) {
@@ -880,6 +1047,7 @@ function ProgressScreen({
 function DadScreen({
   attempts,
   challenges,
+  createChildAccount,
   createChallenge,
   errorsByTopic,
   feedback,
@@ -889,6 +1057,12 @@ function DadScreen({
 }: {
   attempts: Attempt[];
   challenges: Challenge[];
+  createChildAccount: (child: {
+    childEmail: string;
+    childGrade: string;
+    childName: string;
+    childPassword: string;
+  }) => void;
   createChallenge: (questionCount: 5 | 10, topic: Challenge["topic"], childId: string) => void;
   errorsByTopic: { id: Topic; label: string; icon: string; errors: number; total: number }[];
   feedback: string;
@@ -898,12 +1072,61 @@ function DadScreen({
 }) {
   const [count, setCount] = useState<5 | 10>(5);
   const [topic, setTopic] = useState<Challenge["topic"]>("mezclado");
+  const [childName, setChildName] = useState("Mafer");
+  const [childEmail, setChildEmail] = useState("mafer@example.com");
+  const [childPassword, setChildPassword] = useState("");
+  const [childGrade, setChildGrade] = useState("4 de primaria");
   const childIds = Array.from(new Set(challenges.map((challenge) => challenge.childId)));
 
   return (
     <section className="space-y-5">
       <Stats progress={progress} />
       <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-[2rem] bg-white p-6 shadow-soft">
+          <h2 className="text-2xl font-black text-ink">Dar de alta a mi hija</h2>
+          <div className="mt-5 grid gap-4">
+            <input
+              value={childName}
+              onChange={(event) => setChildName(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Nombre"
+            />
+            <input
+              value={childEmail}
+              onChange={(event) => setChildEmail(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Correo de tu hija"
+              type="email"
+            />
+            <input
+              value={childPassword}
+              onChange={(event) => setChildPassword(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Contraseña temporal"
+              type="password"
+            />
+            <input
+              value={childGrade}
+              onChange={(event) => setChildGrade(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Grado"
+            />
+            <button
+              className="big-button bg-lilac text-white"
+              onClick={() =>
+                createChildAccount({
+                  childEmail,
+                  childGrade,
+                  childName,
+                  childPassword
+                })
+              }
+            >
+              Crear cuenta de mi hija
+            </button>
+          </div>
+        </div>
+
         <div className="rounded-[2rem] bg-white p-6 shadow-soft">
           <h2 className="text-2xl font-black text-ink">Errores por tema</h2>
           <div className="mt-4 space-y-3">
@@ -1077,6 +1300,7 @@ function detectTutorTopic(message: string) {
   if (normalized.includes("rest") || normalized.includes("menos")) return "restas";
   if (normalized.includes("sum") || normalized.includes("mas") || normalized.includes("más")) return "sumas";
   if (normalized.includes("fraccion") || normalized.includes("fracción")) return "fracciones";
+  if (normalized.includes("tabla")) return "tablas";
   if (normalized.includes("reto")) return "reto";
   if (normalized.includes("foto")) return "foto de tarea";
   return "matematicas";
