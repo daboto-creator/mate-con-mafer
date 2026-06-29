@@ -17,7 +17,7 @@ import type {
 } from "@/lib/types";
 
 type Screen = "inicio" | "practicar" | "tutor" | "progreso" | "papa";
-type PracticeMode = "operation" | "word_problem";
+type PracticeMode = "operation" | "word_problem" | "mixed";
 type AuthMode = "login" | "signup_parent";
 type TutorChatMessage = {
   role: "user" | "assistant";
@@ -53,7 +53,7 @@ export default function Home() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChildId, setSelectedChildId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic>("sumas");
-  const [practiceMode, setPracticeMode] = useState<PracticeMode>("operation");
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>("mixed");
   const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas", "Primaria"));
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -376,7 +376,8 @@ export default function Home() {
   function nextExercise(topic = selectedTopic, mode = practiceMode) {
     setSelectedTopic(topic);
     setPracticeMode(mode);
-    setExercise(createExercise(topic, profile?.grade, mode));
+    const exerciseKind = mode === "mixed" ? (Math.random() > 0.5 ? "operation" : "word_problem") : mode;
+    setExercise(createExercise(topic, profile?.grade, exerciseKind));
     setAnswer("");
     setFeedback("");
   }
@@ -813,7 +814,7 @@ function PracticeScreen({
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <button
           className={`rounded-3xl px-5 py-4 text-lg font-black shadow-sm ${
             practiceMode === "operation" ? "bg-coral text-white" : "bg-white text-ink"
@@ -830,11 +831,19 @@ function PracticeScreen({
         >
           Problemas con historia
         </button>
+        <button
+          className={`rounded-3xl px-5 py-4 text-lg font-black shadow-sm ${
+            practiceMode === "mixed" ? "bg-ink text-white" : "bg-white text-ink"
+          }`}
+          onClick={() => nextExercise(selectedTopic, "mixed")}
+        >
+          Mixto
+        </button>
       </div>
 
       <div className="rounded-[2rem] bg-white p-6 text-center shadow-soft sm:p-10">
         <p className="text-sm font-black uppercase tracking-[0.16em] text-coral">
-          {practiceMode === "word_problem" ? "Problema" : "Ejercicio"} de {topicLabel(exercise.topic)}
+          {exercise.kind === "word_problem" ? "Problema" : "Operación"} de {topicLabel(exercise.topic)}
         </p>
         <div
           className={`my-8 rounded-[2rem] bg-rose-50 px-4 py-10 font-black text-ink ${
@@ -921,7 +930,7 @@ function TutorScreen({
       <h2 className="mt-2 text-4xl font-black text-ink">Aquí te ayudo paso a paso.</h2>
       <p className="mt-3 max-w-2xl text-xl font-bold text-ink/70">No hago la tarea por ti.</p>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_16rem]">
+      <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_18rem]">
         <div className="flex min-h-[26rem] flex-col rounded-[2rem] bg-rose-50 p-4">
           <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
             {quickActions.map((action) => (
@@ -987,19 +996,40 @@ function TutorScreen({
           {tutorError ? <p className="mt-3 rounded-2xl bg-sunshine/70 p-4 font-black text-ink">{tutorError}</p> : null}
         </div>
 
-        <div className="grid min-h-56 place-items-center rounded-[2rem] border-4 border-dashed border-ink/10 bg-white p-5 text-center">
-          <div className="space-y-4">
-            <div className="text-6xl">📷</div>
-            <label className="big-button inline-block bg-ink text-white">
-              Subir foto de una tarea
-              <input
-                aria-label="Subir foto de una tarea"
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(event) => handleHomeworkPhoto(event.target.files?.[0])}
-              />
-            </label>
+        <div className="grid gap-4">
+          <div className="grid min-h-56 place-items-center rounded-[2rem] border-4 border-dashed border-ink/10 bg-white p-5 text-center">
+            <div className="space-y-4">
+              <div className="text-6xl">📷</div>
+              <h3 className="text-xl font-black text-ink">Foto de tarea</h3>
+              <label className="big-button inline-block bg-ink text-white">
+                Subir foto
+                <input
+                  aria-label="Subir foto de una tarea"
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(event) => handleHomeworkPhoto(event.target.files?.[0])}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] bg-sunshine p-5 text-center shadow-sm">
+            <div className="space-y-4">
+              <div className="text-5xl">✏️</div>
+              <h3 className="text-xl font-black text-ink">Resolver problemas</h3>
+              <button
+                className="big-button bg-lilac text-white"
+                disabled={isThinking}
+                onClick={() =>
+                  sendMessage(
+                    "Quiero resolver problemas de matemáticas. Dame un problema para 4º de primaria, mezclando operaciones y problemas con historia. No me des la respuesta hasta que yo intente."
+                  )
+                }
+              >
+                Empezar
+              </button>
+            </div>
           </div>
         </div>
       </div>
