@@ -57,6 +57,7 @@ export default function Home() {
   const [progressRows, setProgressRows] = useState<TopicProgress[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [learningAttempts, setLearningAttempts] = useState<LearningAttempt[]>([]);
+  const [studySessionIds, setStudySessionIds] = useState<Partial<Record<Subject, string>>>({});
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChildId, setSelectedChildId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic>("sumas");
@@ -380,8 +381,10 @@ export default function Home() {
     if (!supabase || !profile || profile.role !== "child") return;
 
     const createdAt = new Date().toISOString();
+    const sessionId = attempt.sessionId ?? (await ensureStudySession(attempt.subject));
     const nextAttempt: LearningAttempt = {
       ...attempt,
+      sessionId,
       userId: profile.id,
       createdAt
     };
@@ -390,7 +393,7 @@ export default function Home() {
 
     await supabase.from("learning_attempts").insert({
       user_id: profile.id,
-      session_id: attempt.sessionId,
+      session_id: sessionId,
       subject: attempt.subject,
       topic: attempt.topic,
       subtopic: attempt.subtopic,
@@ -432,6 +435,25 @@ export default function Home() {
       },
       { onConflict: "user_id,subject,topic,subtopic" }
     );
+  }
+
+  async function ensureStudySession(subject: Subject) {
+    if (!supabase || !profile || profile.role !== "child") return null;
+    if (studySessionIds[subject]) return studySessionIds[subject] ?? null;
+
+    const { data, error } = await supabase
+      .from("study_sessions")
+      .insert({
+        user_id: profile.id,
+        subject
+      })
+      .select("id")
+      .single();
+
+    if (error || !data?.id) return null;
+
+    setStudySessionIds((sessions) => ({ ...sessions, [subject]: data.id }));
+    return data.id as string;
   }
 
   async function reviewAnswer() {
