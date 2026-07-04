@@ -3,20 +3,26 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { PwaInstaller } from "@/components/PwaInstaller";
+import { createEnglishExercise, englishTopics } from "@/lib/english";
+import { buildDailyActivity, buildReinforcementCards, nextDifficulty, pickPracticeKind } from "@/lib/learning";
 import { createExercise, nextStreak, topics } from "@/lib/math";
 import { isSupabaseReady, supabase } from "@/lib/supabase";
 import type {
   Attempt,
   Challenge,
+  EnglishExercise,
+  EnglishTopic,
   Exercise,
+  LearningAttempt,
   Profile,
   Progress,
   Role,
+  Subject,
   Topic,
   TopicProgress
 } from "@/lib/types";
 
-type Screen = "inicio" | "practicar" | "tutor" | "progreso" | "papa";
+type Screen = "inicio" | "practicar" | "ingles" | "tutor" | "progreso" | "papa";
 type PracticeMode = "operation" | "word_problem" | "mixed";
 type AuthMode = "login" | "signup_parent";
 type TutorChatMessage = {
@@ -50,13 +56,22 @@ export default function Home() {
   const [screen, setScreen] = useState<Screen>("inicio");
   const [progressRows, setProgressRows] = useState<TopicProgress[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [learningAttempts, setLearningAttempts] = useState<LearningAttempt[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChildId, setSelectedChildId] = useState("");
   const [selectedTopic, setSelectedTopic] = useState<Topic>("sumas");
   const [practiceMode, setPracticeMode] = useState<PracticeMode>("mixed");
-  const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas", "Primaria"));
+  const [exercise, setExercise] = useState<Exercise>(() => createExercise("sumas", "Primaria", "operation", 1));
   const [answer, setAnswer] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [exerciseStartedAt, setExerciseStartedAt] = useState(() => Date.now());
+  const [hintRequested, setHintRequested] = useState(false);
+  const [englishTopic, setEnglishTopic] = useState<EnglishTopic>("gramatica");
+  const [englishExercise, setEnglishExercise] = useState<EnglishExercise>(() => createEnglishExercise("gramatica", 1));
+  const [englishAnswer, setEnglishAnswer] = useState("");
+  const [englishFeedback, setEnglishFeedback] = useState("");
+  const [englishStartedAt, setEnglishStartedAt] = useState(() => Date.now());
+  const [englishHintRequested, setEnglishHintRequested] = useState(false);
   const [photo, setPhoto] = useState<string | null>(null);
   const [tutorInput, setTutorInput] = useState("");
   const [tutorMessages, setTutorMessages] = useState<TutorChatMessage[]>([]);
@@ -237,7 +252,7 @@ export default function Home() {
     if (!supabase || !currentProfile) return;
 
     if (currentProfile.role === "child") {
-      const [{ data: attemptRows }, { data: progressData }, { data: assignmentRows }] = await Promise.all([
+      const [{ data: attemptRows }, { data: progressData }, { data: assignmentRows }, { data: learningRows }] = await Promise.all([
         supabase
           .from("math_attempts")
           .select("*")
@@ -249,12 +264,19 @@ export default function Home() {
           .from("assignments")
           .select("*")
           .eq("child_id", currentProfile.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("learning_attempts")
+          .select("*")
+          .eq("user_id", currentProfile.id)
           .order("created_at", { ascending: false })
+          .limit(300)
       ]);
 
       setAttempts((attemptRows ?? []).map(mapAttempt));
       setProgressRows((progressData ?? []).map(mapTopicProgress));
       setChallenges((assignmentRows ?? []).map(mapChallenge));
+      setLearningAttempts((learningRows ?? []).map(mapLearningAttempt));
       setSelectedChildId(currentProfile.id);
       return;
     }
@@ -274,21 +296,29 @@ export default function Home() {
     if (!activeChildId) {
       setAttempts([]);
       setProgressRows([]);
+      setLearningAttempts([]);
       return;
     }
 
-    const [{ data: attemptRows }, { data: progressData }] = await Promise.all([
+    const [{ data: attemptRows }, { data: progressData }, { data: learningRows }] = await Promise.all([
       supabase
         .from("math_attempts")
         .select("*")
         .eq("user_id", activeChildId)
         .order("created_at", { ascending: false })
         .limit(100),
-      supabase.from("math_progress").select("*").eq("user_id", activeChildId)
+      supabase.from("math_progress").select("*").eq("user_id", activeChildId),
+      supabase
+        .from("learning_attempts")
+        .select("*")
+        .eq("user_id", activeChildId)
+        .order("created_at", { ascending: false })
+        .limit(300)
     ]);
 
     setAttempts((attemptRows ?? []).map(mapAttempt));
     setProgressRows((progressData ?? []).map(mapTopicProgress));
+    setLearningAttempts((learningRows ?? []).map(mapLearningAttempt));
   }
 
   async function saveAttempt(attempt: Attempt) {
@@ -341,6 +371,69 @@ export default function Home() {
     );
   }
 
+  function recentLevel(subject: Subject, topic: string) {
+    const latest = learningAttempts.find((attempt) => attempt.subject === subject && attempt.topic === topic);
+    return latest?.difficultyLevel ?? 1;
+  }
+
+  async function saveLearningAttempt(attempt: Omit<LearningAttempt, "id" | "userId" | "createdAt">) {
+    if (!supabase || !profile || profile.role !== "child") return;
+
+    const createdAt = new Date().toISOString();
+    const nextAttempt: LearningAttempt = {
+      ...attempt,
+      userId: profile.id,
+      createdAt
+    };
+
+    setLearningAttempts((items) => [nextAttempt, ...items]);
+
+    await supabase.from("learning_attempts").insert({
+      user_id: profile.id,
+      session_id: attempt.sessionId,
+      subject: attempt.subject,
+      topic: attempt.topic,
+      subtopic: attempt.subtopic,
+      activity_type: attempt.activityType,
+      operation_type: attempt.operationType,
+      difficulty_level: attempt.difficultyLevel,
+      question: attempt.question,
+      answer_given: attempt.answerGiven,
+      correct_answer: attempt.correctAnswer,
+      is_correct: attempt.isCorrect,
+      attempts_count: attempt.attemptsCount,
+      hint_requested: attempt.hintRequested,
+      response_time_seconds: attempt.responseTimeSeconds,
+      created_at: createdAt
+    });
+
+    const adaptive = nextDifficulty(
+      [nextAttempt, ...learningAttempts],
+      attempt.subject,
+      attempt.topic,
+      attempt.subtopic,
+      attempt.difficultyLevel
+    );
+
+    await supabase.from("learning_progress").upsert(
+      {
+        user_id: profile.id,
+        subject: attempt.subject,
+        topic: attempt.topic,
+        subtopic: attempt.subtopic,
+        difficulty_level: adaptive.difficultyLevel,
+        status: adaptive.status === "review" ? "review" : adaptive.status === "mastered" ? "mastered" : "in_progress",
+        correct_answers: attempt.isCorrect ? 1 : 0,
+        incorrect_answers: attempt.isCorrect ? 0 : 1,
+        hints_requested: attempt.hintRequested ? 1 : 0,
+        average_response_seconds: attempt.responseTimeSeconds,
+        last_practiced_at: createdAt,
+        updated_at: createdAt
+      },
+      { onConflict: "user_id,subject,topic,subtopic" }
+    );
+  }
+
   async function reviewAnswer() {
     if (!profile || profile.role !== "child") {
       setFeedback("Inicia sesión como Mafer para practicar.");
@@ -365,6 +458,22 @@ export default function Home() {
 
     await saveAttempt(attempt);
     await updateTopicProgress(exercise.topic, isCorrect);
+    await saveLearningAttempt({
+      sessionId: null,
+      subject: "math",
+      topic: exercise.topic,
+      subtopic: exercise.subtopic,
+      activityType: exercise.kind,
+      operationType: exercise.operationType,
+      difficultyLevel: exercise.difficultyLevel,
+      question: exercise.question,
+      answerGiven: String(numericAnswer),
+      correctAnswer: String(exercise.answer),
+      isCorrect,
+      attemptsCount: 1,
+      hintRequested,
+      responseTimeSeconds: Math.max(1, Math.round((Date.now() - exerciseStartedAt) / 1000))
+    });
 
     setFeedback(
       isCorrect
@@ -376,10 +485,65 @@ export default function Home() {
   function nextExercise(topic = selectedTopic, mode = practiceMode) {
     setSelectedTopic(topic);
     setPracticeMode(mode);
+    const mix = pickPracticeKind();
+    const baseLevel = recentLevel("math", topic);
+    const difficultyLevel =
+      mode === "mixed" && mix === "challenge" ? Math.min(baseLevel + 1, 5) : mode === "mixed" && mix === "review" ? Math.max(baseLevel - 1, 1) : baseLevel;
     const exerciseKind = mode === "mixed" ? (Math.random() > 0.5 ? "operation" : "word_problem") : mode;
-    setExercise(createExercise(topic, profile?.grade, exerciseKind));
+    setExercise(createExercise(topic, profile?.grade, exerciseKind, difficultyLevel));
     setAnswer("");
     setFeedback("");
+    setHintRequested(false);
+    setExerciseStartedAt(Date.now());
+  }
+
+  function nextEnglishExercise(topic = englishTopic) {
+    const baseLevel = recentLevel("english", topic);
+    const mix = pickPracticeKind();
+    const difficultyLevel = mix === "challenge" ? Math.min(baseLevel + 1, 5) : mix === "review" ? Math.max(baseLevel - 1, 1) : baseLevel;
+    setEnglishTopic(topic);
+    setEnglishExercise(createEnglishExercise(topic, difficultyLevel));
+    setEnglishAnswer("");
+    setEnglishFeedback("");
+    setEnglishHintRequested(false);
+    setEnglishStartedAt(Date.now());
+  }
+
+  async function reviewEnglishAnswer(answerValue = englishAnswer) {
+    if (!profile || profile.role !== "child") {
+      setEnglishFeedback("Inicia sesión como Mafer para practicar inglés.");
+      return;
+    }
+
+    const normalizedAnswer = answerValue.trim().toLowerCase();
+    if (!normalizedAnswer) {
+      setEnglishFeedback("Elige o escribe una respuesta primero.");
+      return;
+    }
+
+    const isCorrect = normalizedAnswer === englishExercise.answer.trim().toLowerCase();
+    await saveLearningAttempt({
+      sessionId: null,
+      subject: "english",
+      topic: englishExercise.topic,
+      subtopic: englishExercise.subtopic,
+      activityType: englishExercise.activityType,
+      operationType: null,
+      difficultyLevel: englishExercise.difficultyLevel,
+      question: englishExercise.question,
+      answerGiven: answerValue,
+      correctAnswer: englishExercise.answer,
+      isCorrect,
+      attemptsCount: 1,
+      hintRequested: englishHintRequested,
+      responseTimeSeconds: Math.max(1, Math.round((Date.now() - englishStartedAt) / 1000))
+    });
+
+    setEnglishFeedback(
+      isCorrect
+        ? `¡Muy bien! ${englishExercise.explanation}`
+        : `Buen intento. Pista: ${englishExercise.hint}`
+    );
   }
 
   async function createChallenge(questionCount: 5 | 10, topic: Challenge["topic"], childId: string) {
@@ -414,6 +578,56 @@ export default function Home() {
     setChallenges((items) => [nextChallenge, ...items]);
     setSelectedChildId(childId);
     setFeedback("Reto creado para Mafer.");
+  }
+
+  async function createPersonalizedChallenge({
+    challengeSubject,
+    childId,
+    difficultyLevel,
+    estimatedMinutes,
+    isRequired,
+    questionCount,
+    suggestedDate,
+    subtopic,
+    topic
+  }: {
+    challengeSubject: Subject;
+    childId: string;
+    difficultyLevel: number;
+    estimatedMinutes: number;
+    isRequired: boolean;
+    questionCount: number;
+    suggestedDate: string;
+    subtopic: string;
+    topic: string;
+  }) {
+    if (!supabase || !profile || profile.role !== "parent") return;
+
+    if (!childId) {
+      setFeedback("Primero elige o pega el id de Mafer.");
+      return;
+    }
+
+    const { error } = await supabase.from("personalized_challenges").insert({
+      parent_id: profile.id,
+      child_id: childId,
+      subject: challengeSubject,
+      topic,
+      subtopic,
+      number_of_questions: questionCount,
+      difficulty_level: difficultyLevel,
+      suggested_date: suggestedDate || null,
+      estimated_minutes: estimatedMinutes,
+      challenge_type: isRequired ? "required" : "recommended",
+      status: "pending"
+    });
+
+    if (error) {
+      setFeedback("No pude crear el reto personalizado. Revisa la migración y el enlace con Mafer.");
+      return;
+    }
+
+    setFeedback("Reto personalizado creado para Mafer.");
   }
 
   async function createChildAccount({
@@ -688,6 +902,20 @@ export default function Home() {
             nextExercise={nextExercise}
             reviewAnswer={reviewAnswer}
             setFeedback={setFeedback}
+            setHintRequested={setHintRequested}
+          />
+        ) : null}
+        {screen === "ingles" ? (
+          <EnglishScreen
+            answer={englishAnswer}
+            exercise={englishExercise}
+            feedback={englishFeedback}
+            nextExercise={nextEnglishExercise}
+            reviewAnswer={reviewEnglishAnswer}
+            selectedTopic={englishTopic}
+            setAnswer={setEnglishAnswer}
+            setFeedback={setEnglishFeedback}
+            setHintRequested={setEnglishHintRequested}
           />
         ) : null}
         {screen === "tutor" ? (
@@ -707,8 +935,10 @@ export default function Home() {
             challenges={challenges}
             createChildAccount={createChildAccount}
             createChallenge={createChallenge}
+            createPersonalizedChallenge={createPersonalizedChallenge}
             errorsByTopic={errorsByTopic}
             feedback={feedback}
+            learningAttempts={learningAttempts}
             progress={progress}
             selectedChildId={selectedChildId}
             setSelectedChildId={setSelectedChildId}
@@ -737,7 +967,7 @@ function HomeScreen({
 }: {
   challenges: Challenge[];
   progress: Progress;
-  setScreen: (screen: "practicar" | "tutor" | "progreso") => void;
+  setScreen: (screen: "practicar" | "ingles" | "tutor" | "progreso") => void;
 }) {
   return (
     <section className="grid gap-5 lg:grid-cols-[0.92fr_1.08fr]">
@@ -764,6 +994,9 @@ function HomeScreen({
           <button className="big-button bg-coral text-white" onClick={() => setScreen("practicar")}>
             Practicar
           </button>
+          <button className="big-button bg-sunshine text-ink" onClick={() => setScreen("ingles")}>
+            Inglés con Mafer
+          </button>
           <button className="big-button bg-lilac text-white" onClick={() => setScreen("tutor")}>
             Tutor de matemáticas
           </button>
@@ -785,7 +1018,8 @@ function PracticeScreen({
   reviewAnswer,
   selectedTopic,
   setAnswer,
-  setFeedback
+  setFeedback,
+  setHintRequested
 }: {
   answer: string;
   exercise: Exercise;
@@ -796,6 +1030,7 @@ function PracticeScreen({
   selectedTopic: Topic;
   setAnswer: (answer: string) => void;
   setFeedback: (feedback: string) => void;
+  setHintRequested: (value: boolean) => void;
 }) {
   return (
     <section className="space-y-5">
@@ -871,11 +1106,111 @@ function PracticeScreen({
           </button>
           <button
             className="big-button bg-mint text-ink sm:col-span-1"
-            onClick={() => setFeedback(exercise.hint)}
+            onClick={() => {
+              setHintRequested(true);
+              setFeedback(exercise.hint);
+            }}
           >
             Necesito una pista
           </button>
           <button className="big-button bg-ink text-white sm:col-span-1" onClick={() => nextExercise(selectedTopic, practiceMode)}>
+            Siguiente
+          </button>
+        </div>
+        {feedback ? (
+          <p className="mx-auto mt-6 max-w-2xl rounded-3xl bg-sunshine/60 p-5 text-xl font-black text-ink">
+            {feedback}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function EnglishScreen({
+  answer,
+  exercise,
+  feedback,
+  nextExercise,
+  reviewAnswer,
+  selectedTopic,
+  setAnswer,
+  setFeedback,
+  setHintRequested
+}: {
+  answer: string;
+  exercise: EnglishExercise;
+  feedback: string;
+  nextExercise: (topic?: EnglishTopic) => void;
+  reviewAnswer: (answer?: string) => void;
+  selectedTopic: EnglishTopic;
+  setAnswer: (answer: string) => void;
+  setFeedback: (feedback: string) => void;
+  setHintRequested: (value: boolean) => void;
+}) {
+  return (
+    <section className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {englishTopics.map((topic) => (
+          <button
+            className={`rounded-3xl px-4 py-4 text-lg font-black shadow-sm ${
+              selectedTopic === topic.id ? "bg-ink text-white" : "bg-white text-ink"
+            }`}
+            key={topic.id}
+            onClick={() => nextExercise(topic.id)}
+          >
+            <span className="mr-2">{topic.icon}</span>
+            {topic.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-[2rem] bg-white p-6 text-center shadow-soft sm:p-10">
+        <p className="text-sm font-black uppercase tracking-[0.16em] text-lilac">
+          Inglés · {exercise.subtopic}
+        </p>
+        <div className="my-8 rounded-[2rem] bg-rose-50 px-4 py-10 text-3xl font-black leading-tight text-ink sm:text-5xl">
+          {exercise.question}
+        </div>
+
+        {exercise.options ? (
+          <div className="mx-auto grid max-w-2xl gap-3 sm:grid-cols-3">
+            {exercise.options.map((option) => (
+              <button
+                className={`rounded-3xl px-4 py-5 text-xl font-black shadow-sm ${
+                  answer === option ? "bg-lilac text-white" : "bg-white text-ink"
+                }`}
+                key={option}
+                onClick={() => setAnswer(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <input
+            aria-label="Respuesta de inglés"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            className="mx-auto w-full max-w-lg rounded-3xl border-2 border-ink/10 bg-white px-6 py-5 text-center text-2xl font-black outline-none focus:border-lilac"
+            placeholder="Escribe tu respuesta"
+          />
+        )}
+
+        <div className="mx-auto mt-5 grid max-w-xl gap-3 sm:grid-cols-3">
+          <button className="big-button bg-lilac text-white sm:col-span-1" onClick={() => reviewAnswer()}>
+            Revisar
+          </button>
+          <button
+            className="big-button bg-mint text-ink sm:col-span-1"
+            onClick={() => {
+              setHintRequested(true);
+              setFeedback(exercise.hint);
+            }}
+          >
+            Necesito una pista
+          </button>
+          <button className="big-button bg-ink text-white sm:col-span-1" onClick={() => nextExercise(selectedTopic)}>
             Siguiente
           </button>
         </div>
@@ -1079,8 +1414,10 @@ function DadScreen({
   challenges,
   createChildAccount,
   createChallenge,
+  createPersonalizedChallenge,
   errorsByTopic,
   feedback,
+  learningAttempts,
   progress,
   selectedChildId,
   setSelectedChildId
@@ -1094,23 +1431,110 @@ function DadScreen({
     childPassword: string;
   }) => void;
   createChallenge: (questionCount: 5 | 10, topic: Challenge["topic"], childId: string) => void;
+  createPersonalizedChallenge: (challenge: {
+    challengeSubject: Subject;
+    childId: string;
+    difficultyLevel: number;
+    estimatedMinutes: number;
+    isRequired: boolean;
+    questionCount: number;
+    suggestedDate: string;
+    subtopic: string;
+    topic: string;
+  }) => void;
   errorsByTopic: { id: Topic; label: string; icon: string; errors: number; total: number }[];
   feedback: string;
+  learningAttempts: LearningAttempt[];
   progress: Progress;
   selectedChildId: string;
   setSelectedChildId: (childId: string) => void;
 }) {
   const [count, setCount] = useState<5 | 10>(5);
-  const [topic, setTopic] = useState<Challenge["topic"]>("mezclado");
+  const [topic, setTopic] = useState<string>("mezclado");
+  const [challengeSubject, setChallengeSubject] = useState<Subject>("math");
+  const [challengeSubtopic, setChallengeSubtopic] = useState("Puntos a reforzar");
+  const [challengeDifficulty, setChallengeDifficulty] = useState(1);
+  const [challengeDate, setChallengeDate] = useState("");
+  const [challengeMinutes, setChallengeMinutes] = useState(10);
+  const [challengeRequired, setChallengeRequired] = useState(false);
   const [childName, setChildName] = useState("Mafer");
   const [childEmail, setChildEmail] = useState("mafer@example.com");
   const [childPassword, setChildPassword] = useState("");
   const [childGrade, setChildGrade] = useState("4 de primaria");
+  const [dadTab, setDadTab] = useState<"general" | "math" | "english">("general");
   const childIds = Array.from(new Set(challenges.map((challenge) => challenge.childId)));
+  const scopedSubject = dadTab === "general" ? undefined : dadTab;
+  const reinforcementCards = buildReinforcementCards(learningAttempts, scopedSubject);
+  const dailyActivity = buildDailyActivity(learningAttempts, scopedSubject);
+  const totalLearning = learningAttempts.length;
+  const correctLearning = learningAttempts.filter((attempt) => attempt.isCorrect).length;
+  const totalSeconds = learningAttempts.reduce((total, attempt) => total + attempt.responseTimeSeconds, 0);
 
   return (
     <section className="space-y-5">
       <Stats progress={progress} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[
+          { id: "general", label: "Resumen general" },
+          { id: "math", label: "Matemáticas" },
+          { id: "english", label: "Inglés" }
+        ].map((item) => (
+          <button
+            className={`rounded-3xl px-4 py-4 text-lg font-black shadow-sm ${
+              dadTab === item.id ? "bg-ink text-white" : "bg-white text-ink"
+            }`}
+            key={item.id}
+            onClick={() => setDadTab(item.id as "general" | "math" | "english")}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Metric label="Tiempo total de estudio" value={`${Math.round(totalSeconds / 60)} min`} />
+        <Metric label="Ejercicios totales" value={totalLearning || attempts.length} />
+        <Metric
+          label="Promedio de aciertos"
+          value={`${totalLearning ? Math.round((correctLearning / totalLearning) * 100) : 0}%`}
+        />
+        <Metric label="Racha de estudio" value={`${progress.streak} días`} />
+      </div>
+
+      <div className="rounded-[2rem] bg-white p-6 shadow-soft">
+        <h2 className="text-2xl font-black text-ink">Puntos a reforzar</h2>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          {reinforcementCards.map((card) => (
+            <ReinforcementCardView card={card} key={`${card.subject}-${card.topic}-${card.subtopic}`} />
+          ))}
+          {reinforcementCards.length === 0 ? (
+            <p className="font-bold text-ink/60">Cuando Mafer practique, aquí aparecerán recomendaciones.</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-[2rem] bg-white p-6 shadow-soft">
+        <h2 className="text-2xl font-black text-ink">Actividad diaria</h2>
+        <div className="mt-4 grid gap-4 lg:grid-cols-7">
+          {dailyActivity.map((day) => (
+            <div className="rounded-2xl bg-rose-50 p-4" key={day.day}>
+              <p className="text-sm font-black text-ink/50">{day.day.slice(5)}</p>
+              <p className="mt-2 text-2xl font-black text-ink">{Math.round(day.totalSeconds / 60)} min</p>
+              <p className="text-sm font-bold text-ink/60">{day.exercises} ejercicios</p>
+              <div className="mt-3 h-20 rounded-xl bg-white p-2">
+                <div
+                  className="mt-auto rounded-lg bg-lilac"
+                  style={{ height: `${Math.min(day.exercises * 8, 64)}px` }}
+                />
+              </div>
+            </div>
+          ))}
+          {dailyActivity.length === 0 ? (
+            <p className="font-bold text-ink/60">Todavía no hay actividad adaptativa registrada.</p>
+          ) : null}
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-[2rem] bg-white p-6 shadow-soft">
           <h2 className="text-2xl font-black text-ink">Dar de alta a mi hija</h2>
@@ -1178,7 +1602,7 @@ function DadScreen({
         </div>
 
         <div className="rounded-[2rem] bg-white p-6 shadow-soft">
-          <h2 className="text-2xl font-black text-ink">Crear reto simple</h2>
+          <h2 className="text-2xl font-black text-ink">Crear reto personalizado</h2>
           <div className="mt-5 grid gap-4">
             <input
               value={selectedChildId}
@@ -1200,6 +1624,14 @@ function DadScreen({
               </select>
             ) : null}
             <select
+              value={challengeSubject}
+              onChange={(event) => setChallengeSubject(event.target.value as Subject)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+            >
+              <option value="math">Matemáticas</option>
+              <option value="english">Inglés</option>
+            </select>
+            <select
               value={count}
               onChange={(event) => setCount(Number(event.target.value) as 5 | 10)}
               className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
@@ -1209,17 +1641,74 @@ function DadScreen({
             </select>
             <select
               value={topic}
-              onChange={(event) => setTopic(event.target.value as Challenge["topic"])}
+              onChange={(event) => setTopic(event.target.value)}
               className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
             >
               <option value="mezclado">Mezclado</option>
-              {topics.map((topic) => (
+              {(challengeSubject === "math" ? topics : englishTopics).map((topic) => (
                 <option value={topic.id} key={topic.id}>
                   {topic.label}
                 </option>
               ))}
             </select>
-            <button className="big-button bg-ink text-white" onClick={() => createChallenge(count, topic, selectedChildId)}>
+            <input
+              value={challengeSubtopic}
+              onChange={(event) => setChallengeSubtopic(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              placeholder="Subtema"
+            />
+            <div className="grid gap-3 sm:grid-cols-3">
+              <input
+                value={challengeDifficulty}
+                onChange={(event) => setChallengeDifficulty(Number(event.target.value))}
+                className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+                min={1}
+                max={5}
+                type="number"
+              />
+              <input
+                value={challengeMinutes}
+                onChange={(event) => setChallengeMinutes(Number(event.target.value))}
+                className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+                min={1}
+                max={120}
+                type="number"
+              />
+              <input
+                value={challengeDate}
+                onChange={(event) => setChallengeDate(event.target.value)}
+                className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+                type="date"
+              />
+            </div>
+            <label className="flex items-center gap-3 rounded-2xl bg-rose-50 px-4 py-4 text-lg font-black text-ink">
+              <input
+                checked={challengeRequired}
+                onChange={(event) => setChallengeRequired(event.target.checked)}
+                className="size-5"
+                type="checkbox"
+              />
+              Obligatorio
+            </label>
+            <button
+              className="big-button bg-ink text-white"
+              onClick={() => {
+                if (challengeSubject === "math") {
+                  createChallenge(count, topic as Challenge["topic"], selectedChildId);
+                }
+                createPersonalizedChallenge({
+                  challengeSubject,
+                  childId: selectedChildId,
+                  difficultyLevel: challengeDifficulty,
+                  estimatedMinutes: challengeMinutes,
+                  isRequired: challengeRequired,
+                  questionCount: count,
+                  suggestedDate: challengeDate,
+                  subtopic: challengeSubtopic,
+                  topic
+                });
+              }}
+            >
               Crear reto
             </button>
           </div>
@@ -1249,6 +1738,32 @@ function Stats({ progress }: { progress: Progress }) {
   );
 }
 
+function ReinforcementCardView({ card }: { card: ReturnType<typeof buildReinforcementCards>[number] }) {
+  const color =
+    card.status === "mastered"
+      ? "border-mint bg-mint/15"
+      : card.status === "priority"
+        ? "border-berry bg-rose-50"
+        : "border-sunshine bg-sunshine/25";
+  const label = card.status === "mastered" ? "Dominado" : card.status === "priority" ? "Refuerzo prioritario" : "Requiere práctica";
+
+  return (
+    <div className={`rounded-[2rem] border-4 p-5 ${color}`}>
+      <p className="text-sm font-black uppercase tracking-[0.14em] text-ink/50">{card.subject === "math" ? "Matemáticas" : "Inglés"}</p>
+      <h3 className="mt-2 text-2xl font-black text-ink">{card.topic}</h3>
+      <p className="mt-1 font-bold text-ink/65">{card.subtopic}</p>
+      <div className="mt-4 grid gap-2 text-sm font-black text-ink/70">
+        <p>Nivel actual: {card.difficultyLevel}</p>
+        <p>Aciertos recientes: {card.recentAccuracy}%</p>
+        <p>Ejercicios: {card.total}</p>
+        <p>Estado: {label}</p>
+        <p>Tendencia: {card.trend}</p>
+      </div>
+      <p className="mt-4 rounded-2xl bg-white/75 p-3 text-sm font-bold leading-5 text-ink">{card.recommendation}</p>
+    </div>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-[2rem] bg-white p-5 shadow-soft">
@@ -1270,6 +1785,7 @@ function BottomNav({
   const items: { id: Screen; label: string; icon: string }[] = [
     { id: "inicio", label: "Inicio", icon: "⌂" },
     { id: "practicar", label: "Practicar", icon: "+" },
+    { id: "ingles", label: "Inglés", icon: "A" },
     { id: "tutor", label: "Tutor", icon: "?" },
     { id: "progreso", label: "Progreso", icon: "★" }
   ];
@@ -1280,7 +1796,7 @@ function BottomNav({
 
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 border-t border-ink/10 bg-white/92 px-3 pt-3 backdrop-blur">
-      <div className="mx-auto grid max-w-3xl grid-cols-5 gap-2">
+      <div className="mx-auto grid max-w-4xl gap-2" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((item) => (
           <button
             className={`rounded-2xl px-2 py-3 text-sm font-black ${
@@ -1379,6 +1895,28 @@ function mapChallenge(row: any): Challenge {
     questionCount: row.number_of_questions,
     difficulty: row.difficulty,
     status: row.status,
+    createdAt: row.created_at
+  };
+}
+
+function mapLearningAttempt(row: any): LearningAttempt {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sessionId: row.session_id,
+    subject: row.subject,
+    topic: row.topic,
+    subtopic: row.subtopic,
+    activityType: row.activity_type,
+    operationType: row.operation_type,
+    difficultyLevel: row.difficulty_level ?? 1,
+    question: row.question,
+    answerGiven: row.answer_given,
+    correctAnswer: row.correct_answer,
+    isCorrect: row.is_correct,
+    attemptsCount: row.attempts_count ?? 1,
+    hintRequested: row.hint_requested ?? false,
+    responseTimeSeconds: row.response_time_seconds ?? 0,
     createdAt: row.created_at
   };
 }

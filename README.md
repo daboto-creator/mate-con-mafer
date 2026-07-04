@@ -6,12 +6,14 @@ Esta primera versión incluye:
 
 - Inicio de Mafer con estrellas, racha y botones grandes.
 - Práctica de sumas, restas, multiplicaciones y divisiones.
+- Práctica adaptativa con fracciones, razonamiento, geometría, tiempo y dinero.
+- Nueva sección `Inglés con Mafer` con vocabulario, gramática, lectura y traducción.
 - Login por correo y contraseña con Supabase Auth.
 - Un ejercicio por pantalla con respuesta, revisión y pista amable.
 - Tutor de matemáticas conectado a OpenAI desde una ruta segura de servidor.
 - Botones rápidos para pedir pista, otra explicación, otro ejemplo o un reto.
 - Progreso con estrellas, respuestas correctas, temas practicados y racha.
-- Panel de papá con progreso, errores por tema, ejercicios realizados y retos de 5 o 10 preguntas.
+- Panel de papá con resumen general, matemáticas, inglés, puntos a reforzar, actividad diaria y retos personalizados.
 - PWA instalable desde Safari en iPad.
 - Supabase preparado para usuarios, progreso, intentos, retos y conversaciones educativas del tutor.
 - Sin pagos, sin App Store y sin anuncios.
@@ -58,7 +60,8 @@ http://localhost:3000
 
 1. En Supabase, deja activo `Authentication > Sign In / Providers > Email`.
 2. Ejecuta el archivo [supabase-schema.sql](/Users/dbotero/Documents/mate-con-mafer/supabase-schema.sql) en el SQL Editor.
-3. Crea estas cuentas en `Authentication > Users` con contraseñas de prueba que tú elijas:
+3. Ejecuta el archivo [supabase-adaptive-learning.sql](/Users/dbotero/Documents/mate-con-mafer/supabase-adaptive-learning.sql) para activar el seguimiento adaptativo, sesiones, recomendaciones e inglés.
+4. Crea estas cuentas en `Authentication > Users` con contraseñas de prueba que tú elijas:
 
 ```text
 parent@example.com

@@ -6,23 +6,61 @@ export const topics: { id: Topic; label: string; icon: string }[] = [
   { id: "multiplicaciones", label: "Multiplicaciones", icon: "x" },
   { id: "divisiones", label: "Divisiones", icon: "÷" },
   { id: "fracciones", label: "Fracciones", icon: "1/2" },
-  { id: "tablas", label: "Tablas", icon: "#" }
+  { id: "tablas", label: "Tablas", icon: "#" },
+  { id: "razonamiento", label: "Razonamiento", icon: "?" },
+  { id: "geometria", label: "Geometría", icon: "□" },
+  { id: "tiempo", label: "Tiempo", icon: "h" },
+  { id: "dinero", label: "Dinero", icon: "$" }
 ];
 
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pick = <T>(items: T[]) => items[random(0, items.length - 1)];
 
-export function createExercise(topic: Topic, grade?: string | null, kind: Exercise["kind"] = "operation"): Exercise {
+function subtopicFor(topic: Topic, kind: Exercise["kind"], difficultyLevel: number) {
+  const prefix = kind === "word_problem" ? "Problemas" : "Ejercicios";
+  const labels: Record<Topic, string[]> = {
+    sumas: ["Sumas de una cifra", "Sumas de dos cifras sin llevar", "Sumas de dos cifras con llevadas", "Sumas de tres cifras", "Sumas con problemas"],
+    restas: ["Restas sin pedir prestado", "Restas con préstamo", "Restas de tres cifras", "Restas con problemas", "Restas mixtas"],
+    multiplicaciones: ["Multiplicaciones de una cifra", "Multiplicaciones con números mayores", "Dos cifras por una cifra", "Dos cifras por dos cifras", "Problemas de multiplicación"],
+    divisiones: ["Divisiones simples", "Divisiones con residuo", "Divisiones con números mayores", "Problemas de división", "Divisiones mixtas"],
+    fracciones: ["Fracciones básicas", "Suma de fracciones iguales", "Comparación de fracciones", "Fracciones en problemas", "Fracciones mixtas"],
+    tablas: ["Tablas 2 a 5", "Tablas 6 a 8", "Tablas 9 a 12", "Tablas en problemas", "Tablas mixtas"],
+    razonamiento: ["Problemas de una operación", "Problemas de varias operaciones", "Seleccionar operación", "Razonamiento con datos", "Retos de razonamiento"],
+    geometria: ["Figuras básicas", "Lados y vértices", "Perímetro", "Área con cuadritos", "Problemas de geometría"],
+    tiempo: ["Horas y minutos", "Duración de actividades", "Calendario", "Problemas de tiempo", "Tiempo mixto"],
+    dinero: ["Monedas y billetes", "Sumar dinero", "Cambio", "Compras con varias operaciones", "Dinero mixto"]
+  };
+
+  return kind === "word_problem" && topic !== "razonamiento"
+    ? `${prefix}: ${labels[topic][Math.min(difficultyLevel - 1, 4)]}`
+    : labels[topic][Math.min(difficultyLevel - 1, 4)];
+}
+
+function meta(topic: Topic, kind: Exercise["kind"], difficultyLevel: number, operationType: string) {
+  return {
+    kind,
+    topic,
+    subtopic: subtopicFor(topic, kind, difficultyLevel),
+    difficultyLevel,
+    operationType
+  };
+}
+
+export function createExercise(
+  topic: Topic,
+  grade?: string | null,
+  kind: Exercise["kind"] = "operation",
+  difficultyLevel = 1
+): Exercise {
   if (kind === "word_problem") {
-    return createWordProblem(topic, grade);
+    return createWordProblem(topic, grade, difficultyLevel);
   }
 
   if (topic === "sumas") {
     const left = random(3, 40);
     const right = random(2, 35);
     return {
-      kind: "operation",
-      topic,
+      ...meta(topic, "operation", difficultyLevel, "suma"),
       left,
       right,
       symbol: "+",
@@ -36,8 +74,7 @@ export function createExercise(topic: Topic, grade?: string | null, kind: Exerci
     const right = random(2, 30);
     const left = random(right + 2, right + 45);
     return {
-      kind: "operation",
-      topic,
+      ...meta(topic, "operation", difficultyLevel, "resta"),
       left,
       right,
       symbol: "-",
@@ -51,8 +88,7 @@ export function createExercise(topic: Topic, grade?: string | null, kind: Exerci
     const left = random(2, 10);
     const right = random(2, 10);
     return {
-      kind: "operation",
-      topic,
+      ...meta(topic, "operation", difficultyLevel, "multiplicacion"),
       left,
       right,
       symbol: "x",
@@ -67,8 +103,7 @@ export function createExercise(topic: Topic, grade?: string | null, kind: Exerci
     const left = random(1, Math.floor(denominator / 2));
     const right = random(1, denominator - left - 1);
     return {
-      kind: "operation",
-      topic,
+      ...meta(topic, "operation", difficultyLevel, "fraccion"),
       left,
       right,
       symbol: "+",
@@ -82,8 +117,7 @@ export function createExercise(topic: Topic, grade?: string | null, kind: Exerci
     const left = random(2, 12);
     const right = random(2, 12);
     return {
-      kind: "operation",
-      topic,
+      ...meta(topic, "operation", difficultyLevel, "tabla"),
       left,
       right,
       symbol: "x",
@@ -93,12 +127,53 @@ export function createExercise(topic: Topic, grade?: string | null, kind: Exerci
     };
   }
 
+  if (topic === "geometria") {
+    const left = random(3, 12);
+    const right = random(3, 12);
+    return {
+      ...meta(topic, "operation", difficultyLevel, "perimetro"),
+      left,
+      right,
+      symbol: "+",
+      question: `Rectángulo: lados ${left} y ${right}. ¿Cuál es su perímetro?`,
+      answer: 2 * (left + right),
+      hint: `Suma todos los lados: ${left} + ${right} + ${left} + ${right}.`
+    };
+  }
+
+  if (topic === "tiempo") {
+    const left = random(15, 55);
+    const right = random(10, 45);
+    return {
+      ...meta(topic, "operation", difficultyLevel, "tiempo"),
+      left,
+      right,
+      symbol: "+",
+      question: `${left} min + ${right} min`,
+      answer: left + right,
+      hint: `Suma los minutos. Si pasan de 60, puedes formar una hora.`
+    };
+  }
+
+  if (topic === "dinero") {
+    const left = random(12, 90);
+    const right = random(5, 70);
+    return {
+      ...meta(topic, "operation", difficultyLevel, "dinero"),
+      left,
+      right,
+      symbol: "+",
+      question: `$${left} + $${right}`,
+      answer: left + right,
+      hint: `Suma los pesos como una suma normal.`
+    };
+  }
+
   const answer = random(2, 10);
   const right = random(2, 10);
   const left = answer * right;
   return {
-    kind: "operation",
-    topic,
+    ...meta(topic, "operation", difficultyLevel, "division"),
     left,
     right,
     symbol: "÷",
@@ -128,7 +203,7 @@ function numberRange(grade?: string | null) {
   return { addMin: 12, addMax: 90, multiplyMax: 12 };
 }
 
-function createWordProblem(topic: Topic, grade?: string | null): Exercise {
+function createWordProblem(topic: Topic, grade?: string | null, difficultyLevel = 1): Exercise {
   const range = numberRange(grade);
 
   if (topic === "sumas") {
@@ -141,8 +216,7 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
     ]);
 
     return {
-      kind: "word_problem",
-      topic,
+      ...meta(topic, "word_problem", difficultyLevel, "suma"),
       left,
       right,
       symbol: "+",
@@ -162,8 +236,7 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
     ]);
 
     return {
-      kind: "word_problem",
-      topic,
+      ...meta(topic, "word_problem", difficultyLevel, "resta"),
       left,
       right,
       symbol: "-",
@@ -183,8 +256,7 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
     ]);
 
     return {
-      kind: "word_problem",
-      topic,
+      ...meta(topic, "word_problem", difficultyLevel, "multiplicacion"),
       left,
       right,
       symbol: "x",
@@ -205,8 +277,7 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
     ]);
 
     return {
-      kind: "word_problem",
-      topic,
+      ...meta(topic, "word_problem", difficultyLevel, "fraccion"),
       left,
       right,
       symbol: "+",
@@ -226,14 +297,71 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
     ]);
 
     return {
-      kind: "word_problem",
-      topic,
+      ...meta(topic, "word_problem", difficultyLevel, "tabla"),
       left,
       right,
       symbol: "x",
       question: story,
       answer: left * right,
       hint: `Vas bien: son grupos iguales. Usa la tabla del ${left} o suma ${right} un total de ${left} veces.`
+    };
+  }
+
+  if (topic === "razonamiento") {
+    const left = random(8, 35);
+    const right = random(2, 9);
+    const extra = random(3, 18);
+    const answer = left + right * extra;
+    return {
+      ...meta(topic, "word_problem", difficultyLevel, "razonamiento"),
+      left,
+      right,
+      symbol: "+",
+      question: `Mafer tiene ${left} stickers. Compra ${right} paquetes con ${extra} stickers cada uno. ¿Cuántos stickers tiene en total?`,
+      answer,
+      hint: `Primero calcula los stickers de los paquetes: ${right} x ${extra}. Luego suma los que ya tenía.`
+    };
+  }
+
+  if (topic === "geometria") {
+    const left = random(4, 14);
+    const right = random(3, 12);
+    return {
+      ...meta(topic, "word_problem", difficultyLevel, "perimetro"),
+      left,
+      right,
+      symbol: "+",
+      question: `Mafer dibuja un marco para una pintura. Mide ${left} cm de largo y ${right} cm de ancho. ¿Cuántos cm necesita para rodearlo?`,
+      answer: 2 * (left + right),
+      hint: `Un marco rodea los cuatro lados: largo + ancho + largo + ancho.`
+    };
+  }
+
+  if (topic === "tiempo") {
+    const left = random(20, 55);
+    const right = random(10, 45);
+    return {
+      ...meta(topic, "word_problem", difficultyLevel, "tiempo"),
+      left,
+      right,
+      symbol: "+",
+      question: `Mafer pinta durante ${left} minutos y luego juega con slime ${right} minutos. ¿Cuántos minutos usó en total?`,
+      answer: left + right,
+      hint: `Suma los dos tiempos: primero pintura, luego slime.`
+    };
+  }
+
+  if (topic === "dinero") {
+    const left = random(15, 95);
+    const right = random(8, 60);
+    return {
+      ...meta(topic, "word_problem", difficultyLevel, "dinero"),
+      left,
+      right,
+      symbol: "+",
+      question: `Mafer quiere comprar pinturas de $${left} y stickers de $${right}. ¿Cuánto necesita pagar?`,
+      answer: left + right,
+      hint: `Junta los dos precios con una suma.`
     };
   }
 
@@ -247,8 +375,7 @@ function createWordProblem(topic: Topic, grade?: string | null): Exercise {
   ]);
 
   return {
-    kind: "word_problem",
-    topic,
+    ...meta(topic, "word_problem", difficultyLevel, "division"),
     left,
     right,
     symbol: "÷",
