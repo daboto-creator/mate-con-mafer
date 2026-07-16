@@ -21,6 +21,7 @@ html {
 body {
   min-height: 100%;
   margin: 0;
+  overflow-x: hidden;
 }
 
 button,
@@ -28,6 +29,14 @@ input,
 select,
 textarea {
   font: inherit;
+  min-width: 0;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
 }
 
 .safe-bottom {
@@ -37,5 +46,21 @@ textarea {
 @layer components {
   .big-button {
     @apply rounded-3xl px-5 py-5 text-center text-xl font-black shadow-sm transition active:scale-[0.98];
+  }
+}
+
+@media (max-width: 430px) {
+  .big-button {
+    @apply rounded-2xl px-4 py-4 text-base;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  button,
+  input,
+  select {
+    overflow-wrap: anywhere;
   }
 }

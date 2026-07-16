@@ -10,6 +10,8 @@ import { isSupabaseReady, supabase } from "@/lib/supabase";
 import type {
   Attempt,
   Challenge,
+  AppLanguage,
+  DifficultyOverride,
   EnglishExercise,
   EnglishTopic,
   Exercise,
@@ -47,6 +49,7 @@ const testProfiles: Record<string, { fullName: string; role: Role; grade: string
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [language, setLanguage] = useState<AppLanguage>("es");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,6 +60,7 @@ export default function Home() {
   const [progressRows, setProgressRows] = useState<TopicProgress[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [learningAttempts, setLearningAttempts] = useState<LearningAttempt[]>([]);
+  const [difficultyOverrides, setDifficultyOverrides] = useState<DifficultyOverride[]>([]);
   const [studySessionIds, setStudySessionIds] = useState<Partial<Record<Subject, string>>>({});
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChildId, setSelectedChildId] = useState("");
@@ -68,7 +72,7 @@ export default function Home() {
   const [exerciseStartedAt, setExerciseStartedAt] = useState(() => Date.now());
   const [hintRequested, setHintRequested] = useState(false);
   const [englishTopic, setEnglishTopic] = useState<EnglishTopic>("gramatica");
-  const [englishExercise, setEnglishExercise] = useState<EnglishExercise>(() => createEnglishExercise("gramatica", 1));
+  const [englishExercise, setEnglishExercise] = useState<EnglishExercise>(() => createEnglishExercise("gramatica", 1, "es"));
   const [englishAnswer, setEnglishAnswer] = useState("");
   const [englishFeedback, setEnglishFeedback] = useState("");
   const [englishStartedAt, setEnglishStartedAt] = useState(() => Date.now());
@@ -253,7 +257,7 @@ export default function Home() {
     if (!supabase || !currentProfile) return;
 
     if (currentProfile.role === "child") {
-      const [{ data: attemptRows }, { data: progressData }, { data: assignmentRows }, { data: learningRows }] = await Promise.all([
+      const [{ data: attemptRows }, { data: progressData }, { data: assignmentRows }, { data: learningRows }, { data: overrideRows }] = await Promise.all([
         supabase
           .from("math_attempts")
           .select("*")
@@ -271,13 +275,19 @@ export default function Home() {
           .select("*")
           .eq("user_id", currentProfile.id)
           .order("created_at", { ascending: false })
-          .limit(300)
+          .limit(300),
+        supabase
+          .from("difficulty_overrides")
+          .select("*")
+          .eq("user_id", currentProfile.id)
+          .order("created_at", { ascending: false })
       ]);
 
       setAttempts((attemptRows ?? []).map(mapAttempt));
       setProgressRows((progressData ?? []).map(mapTopicProgress));
       setChallenges((assignmentRows ?? []).map(mapChallenge));
       setLearningAttempts((learningRows ?? []).map(mapLearningAttempt));
+      setDifficultyOverrides((overrideRows ?? []).map(mapDifficultyOverride));
       setSelectedChildId(currentProfile.id);
       return;
     }
@@ -298,10 +308,11 @@ export default function Home() {
       setAttempts([]);
       setProgressRows([]);
       setLearningAttempts([]);
+      setDifficultyOverrides([]);
       return;
     }
 
-    const [{ data: attemptRows }, { data: progressData }, { data: learningRows }] = await Promise.all([
+    const [{ data: attemptRows }, { data: progressData }, { data: learningRows }, { data: overrideRows }] = await Promise.all([
       supabase
         .from("math_attempts")
         .select("*")
@@ -314,12 +325,18 @@ export default function Home() {
         .select("*")
         .eq("user_id", activeChildId)
         .order("created_at", { ascending: false })
-        .limit(300)
+        .limit(300),
+      supabase
+        .from("difficulty_overrides")
+        .select("*")
+        .eq("user_id", activeChildId)
+        .order("created_at", { ascending: false })
     ]);
 
     setAttempts((attemptRows ?? []).map(mapAttempt));
     setProgressRows((progressData ?? []).map(mapTopicProgress));
     setLearningAttempts((learningRows ?? []).map(mapLearningAttempt));
+    setDifficultyOverrides((overrideRows ?? []).map(mapDifficultyOverride));
   }
 
   async function saveAttempt(attempt: Attempt) {
@@ -373,8 +390,24 @@ export default function Home() {
   }
 
   function recentLevel(subject: Subject, topic: string) {
+    const override = difficultyOverrides.find(
+      (item) =>
+        item.subject === subject &&
+        item.topic === topic &&
+        (!item.expiresAt || new Date(item.expiresAt).getTime() > Date.now())
+    );
+
+    if (override) return override.difficultyLevel;
+
     const latest = learningAttempts.find((attempt) => attempt.subject === subject && attempt.topic === topic);
     return latest?.difficultyLevel ?? 1;
+  }
+
+  function recentQuestions(subject: Subject, topic: string) {
+    return learningAttempts
+      .filter((attempt) => attempt.subject === subject && attempt.topic === topic)
+      .slice(0, 12)
+      .map((attempt) => attempt.question);
   }
 
   async function saveLearningAttempt(attempt: Omit<LearningAttempt, "id" | "userId" | "createdAt">) {
@@ -407,6 +440,21 @@ export default function Home() {
       attempts_count: attempt.attemptsCount,
       hint_requested: attempt.hintRequested,
       response_time_seconds: attempt.responseTimeSeconds,
+      created_at: createdAt
+    });
+
+    await supabase.from("learning_events").insert({
+      user_id: profile.id,
+      subject: attempt.subject,
+      event_type: "attempt_completed",
+      topic: attempt.topic,
+      subtopic: attempt.subtopic,
+      metadata: {
+        is_correct: attempt.isCorrect,
+        difficulty_level: attempt.difficultyLevel,
+        response_time_seconds: attempt.responseTimeSeconds,
+        hint_requested: attempt.hintRequested
+      },
       created_at: createdAt
     });
 
@@ -512,7 +560,7 @@ export default function Home() {
     const difficultyLevel =
       mode === "mixed" && mix === "challenge" ? Math.min(baseLevel + 1, 5) : mode === "mixed" && mix === "review" ? Math.max(baseLevel - 1, 1) : baseLevel;
     const exerciseKind = mode === "mixed" ? (Math.random() > 0.5 ? "operation" : "word_problem") : mode;
-    setExercise(createExercise(topic, profile?.grade, exerciseKind, difficultyLevel));
+    setExercise(createExercise(topic, profile?.grade, exerciseKind, difficultyLevel, recentQuestions("math", topic)));
     setAnswer("");
     setFeedback("");
     setHintRequested(false);
@@ -524,7 +572,7 @@ export default function Home() {
     const mix = pickPracticeKind();
     const difficultyLevel = mix === "challenge" ? Math.min(baseLevel + 1, 5) : mix === "review" ? Math.max(baseLevel - 1, 1) : baseLevel;
     setEnglishTopic(topic);
-    setEnglishExercise(createEnglishExercise(topic, difficultyLevel));
+    setEnglishExercise(createEnglishExercise(topic, difficultyLevel, language, recentQuestions("english", topic)));
     setEnglishAnswer("");
     setEnglishFeedback("");
     setEnglishHintRequested(false);
@@ -650,6 +698,43 @@ export default function Home() {
     }
 
     setFeedback("Reto personalizado creado para Mafer.");
+  }
+
+  async function createDifficultyOverride({
+    childId,
+    difficultyLevel,
+    overrideSubject,
+    topic
+  }: {
+    childId: string;
+    difficultyLevel: number;
+    overrideSubject: Subject;
+    topic: string;
+  }) {
+    if (!supabase || !profile || profile.role !== "parent") return;
+
+    if (!childId) {
+      setFeedback("Primero elige o pega el id de Mafer.");
+      return;
+    }
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await supabase.from("difficulty_overrides").insert({
+      parent_id: profile.id,
+      user_id: childId,
+      subject: overrideSubject,
+      topic,
+      difficulty_level: difficultyLevel,
+      expires_at: expiresAt
+    });
+
+    if (error) {
+      setFeedback("No pude ajustar la dificultad. Revisa la migración adaptativa.");
+      return;
+    }
+
+    setFeedback("Dificultad ajustada por 7 días.");
+    await loadRemoteData(profile);
   }
 
   async function createChildAccount({
@@ -815,6 +900,18 @@ export default function Home() {
               </div>
             </div>
             <div className="grid gap-4">
+              <label className="block text-sm font-bold text-ink/70" htmlFor="language">
+                Idioma de práctica
+              </label>
+              <select
+                id="language"
+                value={language}
+                onChange={(event) => setLanguage(event.target.value as AppLanguage)}
+                className="w-full rounded-2xl border-2 border-ink/10 bg-rose-50 px-5 py-4 text-xl font-bold outline-none focus:border-coral"
+              >
+                <option value="es">Español</option>
+                <option value="en">English</option>
+              </select>
               {authMode === "signup_parent" ? (
                 <>
                   <label className="block text-sm font-bold text-ink/70" htmlFor="parentName">
@@ -957,6 +1054,7 @@ export default function Home() {
             challenges={challenges}
             createChildAccount={createChildAccount}
             createChallenge={createChallenge}
+            createDifficultyOverride={createDifficultyOverride}
             createPersonalizedChallenge={createPersonalizedChallenge}
             errorsByTopic={errorsByTopic}
             feedback={feedback}
@@ -1436,6 +1534,7 @@ function DadScreen({
   challenges,
   createChildAccount,
   createChallenge,
+  createDifficultyOverride,
   createPersonalizedChallenge,
   errorsByTopic,
   feedback,
@@ -1453,6 +1552,12 @@ function DadScreen({
     childPassword: string;
   }) => void;
   createChallenge: (questionCount: 5 | 10, topic: Challenge["topic"], childId: string) => void;
+  createDifficultyOverride: (override: {
+    childId: string;
+    difficultyLevel: number;
+    overrideSubject: Subject;
+    topic: string;
+  }) => void;
   createPersonalizedChallenge: (challenge: {
     challengeSubject: Subject;
     childId: string;
@@ -1479,6 +1584,9 @@ function DadScreen({
   const [challengeDate, setChallengeDate] = useState("");
   const [challengeMinutes, setChallengeMinutes] = useState(10);
   const [challengeRequired, setChallengeRequired] = useState(false);
+  const [overrideSubject, setOverrideSubject] = useState<Subject>("math");
+  const [overrideTopic, setOverrideTopic] = useState("multiplicaciones");
+  const [overrideLevel, setOverrideLevel] = useState(1);
   const [childName, setChildName] = useState("Mafer");
   const [childEmail, setChildEmail] = useState("mafer@example.com");
   const [childPassword, setChildPassword] = useState("");
@@ -1599,6 +1707,52 @@ function DadScreen({
               }
             >
               Crear cuenta de mi hija
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-[2rem] bg-white p-6 shadow-soft">
+          <h2 className="text-2xl font-black text-ink">Ajustar dificultad</h2>
+          <div className="mt-5 grid gap-4">
+            <select
+              value={overrideSubject}
+              onChange={(event) => setOverrideSubject(event.target.value as Subject)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+            >
+              <option value="math">Matemáticas</option>
+              <option value="english">Inglés</option>
+            </select>
+            <select
+              value={overrideTopic}
+              onChange={(event) => setOverrideTopic(event.target.value)}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+            >
+              {(overrideSubject === "math" ? topics : englishTopics).map((topic) => (
+                <option value={topic.id} key={topic.id}>
+                  {topic.label}
+                </option>
+              ))}
+            </select>
+            <input
+              value={overrideLevel}
+              onChange={(event) => setOverrideLevel(Number(event.target.value))}
+              className="rounded-2xl border-2 border-ink/10 bg-rose-50 px-4 py-4 text-lg font-black"
+              max={5}
+              min={1}
+              type="number"
+            />
+            <button
+              className="big-button bg-coral text-white"
+              onClick={() =>
+                createDifficultyOverride({
+                  childId: selectedChildId,
+                  difficultyLevel: overrideLevel,
+                  overrideSubject,
+                  topic: overrideTopic
+                })
+              }
+            >
+              Aplicar por 7 días
             </button>
           </div>
         </div>
@@ -1817,8 +1971,8 @@ function BottomNav({
   }
 
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 border-t border-ink/10 bg-white/92 px-3 pt-3 backdrop-blur">
-      <div className="mx-auto grid max-w-4xl gap-2" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+    <nav className="safe-bottom fixed inset-x-0 bottom-0 overflow-x-auto border-t border-ink/10 bg-white/92 px-3 pt-3 backdrop-blur">
+      <div className="mx-auto grid min-w-[34rem] max-w-4xl gap-2" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((item) => (
           <button
             className={`rounded-2xl px-2 py-3 text-sm font-black ${
@@ -1939,6 +2093,18 @@ function mapLearningAttempt(row: any): LearningAttempt {
     attemptsCount: row.attempts_count ?? 1,
     hintRequested: row.hint_requested ?? false,
     responseTimeSeconds: row.response_time_seconds ?? 0,
+    createdAt: row.created_at
+  };
+}
+
+function mapDifficultyOverride(row: any): DifficultyOverride {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    subject: row.subject,
+    topic: row.topic,
+    difficultyLevel: row.difficulty_level ?? 1,
+    expiresAt: row.expires_at,
     createdAt: row.created_at
   };
 }

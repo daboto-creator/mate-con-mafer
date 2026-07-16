@@ -50,6 +50,23 @@ export function createExercise(
   topic: Topic,
   grade?: string | null,
   kind: Exercise["kind"] = "operation",
+  difficultyLevel = 1,
+  recentQuestions: string[] = []
+): Exercise {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const exercise = createExerciseOnce(topic, grade, kind, difficultyLevel);
+    if (!recentQuestions.includes(exercise.question)) {
+      return exercise;
+    }
+  }
+
+  return createExerciseOnce(topic, grade, kind, difficultyLevel);
+}
+
+function createExerciseOnce(
+  topic: Topic,
+  grade?: string | null,
+  kind: Exercise["kind"] = "operation",
   difficultyLevel = 1
 ): Exercise {
   if (kind === "word_problem") {
@@ -57,8 +74,10 @@ export function createExercise(
   }
 
   if (topic === "sumas") {
-    const left = random(3, 40);
-    const right = random(2, 35);
+    const max = [9, 40, 90, 400, 900][Math.min(difficultyLevel - 1, 4)];
+    const min = difficultyLevel <= 1 ? 1 : 10;
+    const left = random(min, max);
+    const right = random(min, max);
     return {
       ...meta(topic, "operation", difficultyLevel, "suma"),
       left,
@@ -71,8 +90,9 @@ export function createExercise(
   }
 
   if (topic === "restas") {
-    const right = random(2, 30);
-    const left = random(right + 2, right + 45);
+    const max = [9, 50, 100, 500, 900][Math.min(difficultyLevel - 1, 4)];
+    const right = random(1, Math.max(2, Math.floor(max / 2)));
+    const left = random(right + 1, max);
     return {
       ...meta(topic, "operation", difficultyLevel, "resta"),
       left,
@@ -85,8 +105,15 @@ export function createExercise(
   }
 
   if (topic === "multiplicaciones") {
-    const left = random(2, 10);
-    const right = random(2, 10);
+    const ranges = [
+      [2, 9, 2, 9],
+      [6, 12, 2, 12],
+      [10, 99, 2, 9],
+      [10, 99, 10, 99],
+      [100, 999, 2, 9]
+    ][Math.min(difficultyLevel - 1, 4)];
+    const left = random(ranges[0], ranges[1]);
+    const right = random(ranges[2], ranges[3]);
     return {
       ...meta(topic, "operation", difficultyLevel, "multiplicacion"),
       left,
@@ -114,7 +141,8 @@ export function createExercise(
   }
 
   if (topic === "tablas") {
-    const left = random(2, 12);
+    const max = difficultyLevel <= 1 ? 5 : difficultyLevel <= 2 ? 8 : 12;
+    const left = random(2, max);
     const right = random(2, 12);
     return {
       ...meta(topic, "operation", difficultyLevel, "tabla"),

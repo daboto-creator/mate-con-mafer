@@ -1,4 +1,4 @@
-import type { EnglishExercise, EnglishTopic } from "./types";
+import type { AppLanguage, EnglishExercise, EnglishTopic } from "./types";
 
 export const englishTopics: { id: EnglishTopic; label: string; icon: string }[] = [
   { id: "fundamentos", label: "Fundamentos", icon: "ABC" },
@@ -123,7 +123,35 @@ const banks: Record<EnglishTopic, EnglishExercise[]> = {
   ]
 };
 
-export function createEnglishExercise(topic: EnglishTopic, difficultyLevel = 1): EnglishExercise {
+function localizeExercise(exercise: EnglishExercise, language: AppLanguage): EnglishExercise {
+  if (language === "es") return exercise;
+
+  return {
+    ...exercise,
+    question:
+      exercise.activityType === "translation"
+        ? exercise.question.replace("Traduce:", "Translate:")
+        : exercise.question,
+    hint: `Hint: ${exercise.hint}`,
+    explanation: `Good job. ${exercise.explanation}`
+  };
+}
+
+export function createEnglishExercise(
+  topic: EnglishTopic,
+  difficultyLevel = 1,
+  language: AppLanguage = "es",
+  recentQuestions: string[] = []
+): EnglishExercise {
   const pool = banks[topic].filter((exercise) => exercise.difficultyLevel <= difficultyLevel + 1);
-  return pick(pool.length ? pool : banks[topic]);
+  const source = pool.length ? pool : banks[topic];
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const exercise = localizeExercise(pick(source), language);
+    if (!recentQuestions.includes(exercise.question)) {
+      return exercise;
+    }
+  }
+
+  return localizeExercise(pick(source), language);
 }

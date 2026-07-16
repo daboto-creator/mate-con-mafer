@@ -78,6 +78,29 @@ create table if not exists public.personalized_challenges (
   check (parent_id <> child_id)
 );
 
+create table if not exists public.difficulty_overrides (
+  id uuid primary key default gen_random_uuid(),
+  parent_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  subject text not null check (subject in ('math', 'english')),
+  topic text not null,
+  difficulty_level integer not null check (difficulty_level between 1 and 5),
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  check (parent_id <> user_id)
+);
+
+create table if not exists public.learning_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  subject text not null check (subject in ('math', 'english')),
+  event_type text not null,
+  topic text,
+  subtopic text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists study_sessions_user_started_idx on public.study_sessions(user_id, started_at);
 create index if not exists learning_attempts_user_subject_idx on public.learning_attempts(user_id, subject);
 create index if not exists learning_attempts_user_subtopic_idx on public.learning_attempts(user_id, subject, topic, subtopic, created_at);
@@ -85,12 +108,16 @@ create index if not exists learning_progress_user_subject_idx on public.learning
 create index if not exists reinforcement_user_subject_idx on public.reinforcement_recommendations(user_id, subject);
 create index if not exists personalized_challenges_parent_idx on public.personalized_challenges(parent_id);
 create index if not exists personalized_challenges_child_idx on public.personalized_challenges(child_id);
+create index if not exists difficulty_overrides_user_subject_idx on public.difficulty_overrides(user_id, subject, topic);
+create index if not exists learning_events_user_subject_idx on public.learning_events(user_id, subject, created_at);
 
 alter table public.study_sessions enable row level security;
 alter table public.learning_attempts enable row level security;
 alter table public.learning_progress enable row level security;
 alter table public.reinforcement_recommendations enable row level security;
 alter table public.personalized_challenges enable row level security;
+alter table public.difficulty_overrides enable row level security;
+alter table public.learning_events enable row level security;
 
 drop policy if exists "Study sessions visible to owner and assigned parent" on public.study_sessions;
 create policy "Study sessions visible to owner and assigned parent"
@@ -176,3 +203,36 @@ for update
 to authenticated
 using (parent_id = auth.uid() and public.profile_role(auth.uid()) = 'parent')
 with check (parent_id = auth.uid() and public.profile_role(child_id) = 'child');
+
+drop policy if exists "Difficulty overrides visible to parent and child" on public.difficulty_overrides;
+create policy "Difficulty overrides visible to parent and child"
+on public.difficulty_overrides
+for select
+to authenticated
+using (parent_id = auth.uid() or user_id = auth.uid() or public.is_parent_of(user_id));
+
+drop policy if exists "Parents manage difficulty overrides" on public.difficulty_overrides;
+create policy "Parents manage difficulty overrides"
+on public.difficulty_overrides
+for all
+to authenticated
+using (parent_id = auth.uid() and public.profile_role(auth.uid()) = 'parent')
+with check (
+  parent_id = auth.uid()
+  and public.profile_role(auth.uid()) = 'parent'
+  and public.profile_role(user_id) = 'child'
+);
+
+drop policy if exists "Learning events visible to owner and assigned parent" on public.learning_events;
+create policy "Learning events visible to owner and assigned parent"
+on public.learning_events
+for select
+to authenticated
+using (user_id = auth.uid() or public.is_parent_of(user_id));
+
+drop policy if exists "Children create learning events" on public.learning_events;
+create policy "Children create learning events"
+on public.learning_events
+for insert
+to authenticated
+with check (user_id = auth.uid());

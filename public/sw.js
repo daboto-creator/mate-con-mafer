@@ -1,4 +1,4 @@
-const CACHE_NAME = "mate-con-mafer-v2";
+const CACHE_NAME = "mate-con-mafer-v2026-07-16-1";
 const APP_SHELL = [
   "/",
   "/manifest.json",
@@ -9,6 +9,7 @@ const APP_SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
+  self.skipWaiting();
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
 });
 
@@ -19,6 +20,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
       )
+      .then(() => self.clients.claim())
   );
 });
 
@@ -27,17 +29,31 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).catch(() => {
-          if (event.request.mode === "navigate") {
-            return caches.match("/");
-          }
-          return undefined;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
+          return response;
         })
-      );
-    })
+        .catch(() => caches.match("/"))
+    );
+    return;
+  }
+
+  if (event.request.url.includes("/_next/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

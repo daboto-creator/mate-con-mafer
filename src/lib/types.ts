@@ -1,4 +1,5 @@
 export type Subject = "math" | "english";
+export type AppLanguage = "es" | "en";
 
 export type Topic =
   | "sumas"
@@ -123,4 +124,14 @@ export type StudySession = {
   startedAt: string;
   endedAt: string | null;
   durationSeconds: number;
+};
+
+export type DifficultyOverride = {
+  id?: string;
+  userId: string;
+  subject: Subject;
+  topic: string;
+  difficultyLevel: number;
+  expiresAt: string | null;
+  createdAt: string;
 };
