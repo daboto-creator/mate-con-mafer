@@ -389,18 +389,25 @@ export default function Home() {
     );
   }
 
-  function recentLevel(subject: Subject, topic: string) {
-    const override = difficultyOverrides.find(
+  function activeDifficultyOverride(subject: Subject, topic: string) {
+    return difficultyOverrides.find(
       (item) =>
         item.subject === subject &&
         item.topic === topic &&
         (!item.expiresAt || new Date(item.expiresAt).getTime() > Date.now())
     );
+  }
 
+  function recentLevel(subject: Subject, topic: string) {
+    const override = activeDifficultyOverride(subject, topic);
     if (override) return override.difficultyLevel;
 
     const latest = learningAttempts.find((attempt) => attempt.subject === subject && attempt.topic === topic);
     return latest?.difficultyLevel ?? 1;
+  }
+
+  function difficultySource(subject: Subject, topic: string) {
+    return activeDifficultyOverride(subject, topic) ? "Ajustado por papá" : "Automático";
   }
 
   function recentQuestions(subject: Subject, topic: string) {
@@ -729,7 +736,9 @@ export default function Home() {
     });
 
     if (error) {
-      setFeedback("No pude ajustar la dificultad. Revisa la migración adaptativa.");
+      setFeedback(
+        `No pude ajustar la dificultad. Ejecuta supabase-fix-difficulty-overrides.sql y confirma que Mafer esté enlazada con papá. Detalle: ${error.message}`
+      );
       return;
     }
 
@@ -1013,6 +1022,7 @@ export default function Home() {
         {screen === "practicar" ? (
           <PracticeScreen
             answer={answer}
+            difficultySource={difficultySource("math", exercise.topic)}
             exercise={exercise}
             feedback={feedback}
             practiceMode={practiceMode}
@@ -1027,6 +1037,7 @@ export default function Home() {
         {screen === "ingles" ? (
           <EnglishScreen
             answer={englishAnswer}
+            difficultySource={difficultySource("english", englishExercise.topic)}
             exercise={englishExercise}
             feedback={englishFeedback}
             nextExercise={nextEnglishExercise}
@@ -1058,6 +1069,7 @@ export default function Home() {
             createPersonalizedChallenge={createPersonalizedChallenge}
             errorsByTopic={errorsByTopic}
             feedback={feedback}
+            difficultyOverrides={difficultyOverrides}
             learningAttempts={learningAttempts}
             progress={progress}
             selectedChildId={selectedChildId}
@@ -1131,6 +1143,7 @@ function HomeScreen({
 
 function PracticeScreen({
   answer,
+  difficultySource,
   exercise,
   feedback,
   nextExercise,
@@ -1142,6 +1155,7 @@ function PracticeScreen({
   setHintRequested
 }: {
   answer: string;
+  difficultySource: string;
   exercise: Exercise;
   feedback: string;
   nextExercise: (topic?: Topic, mode?: PracticeMode) => void;
@@ -1200,6 +1214,17 @@ function PracticeScreen({
         <p className="text-sm font-black uppercase tracking-[0.16em] text-coral">
           {exercise.kind === "word_problem" ? "Problema" : "Operación"} de {topicLabel(exercise.topic)}
         </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <span className="rounded-full bg-coral/10 px-4 py-2 text-sm font-black text-coral">
+            Nivel {exercise.difficultyLevel}
+          </span>
+          <span className="rounded-full bg-lilac/10 px-4 py-2 text-sm font-black text-lilac">
+            {difficultySource}
+          </span>
+          <span className="rounded-full bg-ink/5 px-4 py-2 text-sm font-black text-ink/65">
+            {exercise.subtopic}
+          </span>
+        </div>
         <div
           className={`my-8 rounded-[2rem] bg-rose-50 px-4 py-10 font-black text-ink ${
             exercise.kind === "word_problem" ? "text-3xl leading-tight sm:text-5xl" : "text-7xl sm:text-8xl"
@@ -1249,6 +1274,7 @@ function PracticeScreen({
 
 function EnglishScreen({
   answer,
+  difficultySource,
   exercise,
   feedback,
   nextExercise,
@@ -1259,6 +1285,7 @@ function EnglishScreen({
   setHintRequested
 }: {
   answer: string;
+  difficultySource: string;
   exercise: EnglishExercise;
   feedback: string;
   nextExercise: (topic?: EnglishTopic) => void;
@@ -1289,6 +1316,17 @@ function EnglishScreen({
         <p className="text-sm font-black uppercase tracking-[0.16em] text-lilac">
           Inglés · {exercise.subtopic}
         </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <span className="rounded-full bg-lilac/10 px-4 py-2 text-sm font-black text-lilac">
+            Nivel {exercise.difficultyLevel}
+          </span>
+          <span className="rounded-full bg-coral/10 px-4 py-2 text-sm font-black text-coral">
+            {difficultySource}
+          </span>
+          <span className="rounded-full bg-ink/5 px-4 py-2 text-sm font-black text-ink/65">
+            {exercise.subtopic}
+          </span>
+        </div>
         <div className="my-8 rounded-[2rem] bg-rose-50 px-4 py-10 text-3xl font-black leading-tight text-ink sm:text-5xl">
           {exercise.question}
         </div>
@@ -1536,6 +1574,7 @@ function DadScreen({
   createChallenge,
   createDifficultyOverride,
   createPersonalizedChallenge,
+  difficultyOverrides,
   errorsByTopic,
   feedback,
   learningAttempts,
@@ -1569,6 +1608,7 @@ function DadScreen({
     subtopic: string;
     topic: string;
   }) => void;
+  difficultyOverrides: DifficultyOverride[];
   errorsByTopic: { id: Topic; label: string; icon: string; errors: number; total: number }[];
   feedback: string;
   learningAttempts: LearningAttempt[];
@@ -1599,6 +1639,27 @@ function DadScreen({
   const totalLearning = learningAttempts.length;
   const correctLearning = learningAttempts.filter((attempt) => attempt.isCorrect).length;
   const totalSeconds = learningAttempts.reduce((total, attempt) => total + attempt.responseTimeSeconds, 0);
+  const levelRows = [
+    ...topics.map((item) => ({ id: item.id, label: item.label, subject: "math" as Subject })),
+    ...englishTopics.map((item) => ({ id: item.id, label: item.label, subject: "english" as Subject }))
+  ].filter((item) => dadTab === "general" || item.subject === dadTab);
+
+  function activeOverride(subject: Subject, topicId: string) {
+    return difficultyOverrides.find(
+      (item) =>
+        item.subject === subject &&
+        item.topic === topicId &&
+        (!item.expiresAt || new Date(item.expiresAt).getTime() > Date.now())
+    );
+  }
+
+  function levelFor(subject: Subject, topicId: string) {
+    const override = activeOverride(subject, topicId);
+    if (override) return override.difficultyLevel;
+
+    const latest = learningAttempts.find((attempt) => attempt.subject === subject && attempt.topic === topicId);
+    return latest?.difficultyLevel ?? 1;
+  }
 
   return (
     <section className="space-y-5">
@@ -1629,6 +1690,64 @@ function DadScreen({
           value={`${totalLearning ? Math.round((correctLearning / totalLearning) * 100) : 0}%`}
         />
         <Metric label="Racha de estudio" value={`${progress.streak} días`} />
+      </div>
+
+      <div className="rounded-[2rem] bg-white p-6 shadow-soft">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.14em] text-ink/50">Dificultad</p>
+            <h2 className="text-2xl font-black text-ink">Nivel actual por tema</h2>
+          </div>
+          <p className="max-w-xl text-sm font-bold text-ink/60">
+            Automático sube con el desempeño de Mafer. Ajustado por papá se mantiene por 7 días.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {levelRows.map((row) => {
+            const override = activeOverride(row.subject, row.id);
+            const level = levelFor(row.subject, row.id);
+
+            return (
+              <div className="rounded-3xl bg-rose-50 p-4" key={`${row.subject}-${row.id}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-ink/45">
+                      {row.subject === "math" ? "Matemáticas" : "Inglés"}
+                    </p>
+                    <h3 className="mt-1 text-xl font-black text-ink">{row.label}</h3>
+                  </div>
+                  <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm">
+                    Nivel {level}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span
+                    className={`rounded-full px-3 py-2 text-xs font-black ${
+                      override ? "bg-coral/15 text-coral" : "bg-mint/20 text-ink"
+                    }`}
+                  >
+                    {override ? "Ajustado por papá" : "Automático"}
+                  </span>
+                  {override?.expiresAt ? (
+                    <span className="rounded-full bg-white px-3 py-2 text-xs font-black text-ink/55">
+                      Hasta {override.expiresAt.slice(0, 10)}
+                    </span>
+                  ) : null}
+                </div>
+                <button
+                  className="mt-4 w-full rounded-2xl bg-ink px-4 py-3 text-sm font-black text-white"
+                  onClick={() => {
+                    setOverrideSubject(row.subject);
+                    setOverrideTopic(row.id);
+                    setOverrideLevel(level);
+                  }}
+                >
+                  Ajustar este nivel
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="rounded-[2rem] bg-white p-6 shadow-soft">
