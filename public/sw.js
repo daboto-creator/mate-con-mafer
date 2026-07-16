@@ -1,4 +1,4 @@
-const CACHE_NAME = "mate-con-mafer-v2026-07-16-1";
+const CACHE_NAME = "mate-con-mafer-v2026-07-16-2";
 const APP_SHELL = [
   "/",
   "/manifest.json",
@@ -22,6 +22,12 @@ self.addEventListener("activate", (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {
